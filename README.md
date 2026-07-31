@@ -213,6 +213,28 @@ from that timestamp to the end of that CSV. The `%1` concurrency cap is the
 safe default for a one-H100 allocation; increase it only when the account is
 allowed more simultaneous GPUs.
 
+## Policy-over-GT comparison videos
+
+After the four trace evaluations have produced their decision CSVs, submit
+the streaming video compositor from the login node:
+
+```bash
+cd ~/FoV_Simulator_UGSRP2026
+mkdir -p /scratch/$USER/fov_trace_eval/logs
+sbatch --array=0-3%1 \
+  --output=/scratch/$USER/fov_trace_eval/logs/video-%A_%a.out \
+  --error=/scratch/$USER/fov_trace_eval/logs/video-%A_%a.err \
+  scripts/slurm_policy_gt_video_array.sbatch
+```
+
+Each task reuses `02_policy_threshold050/cell_decisions.csv`; it does not
+repeat visibility or QoE evaluation. Base/E3/GT PLY parsing is prefetched on
+four CPU threads, policy and GT are rendered by gsplat CUDA using one aligned
+trace camera, and the 1920x2160 RGB frames stream directly to one H.264 encoder
+without a directory of intermediate frame images. Outputs are written to
+`<RESULT_ROOT>/04_policy_gt_video/`, with FoV Policy on top and DanceNet3D GT
+on the bottom.
+
 `scripts/evaluate_evogs_v1.py` is retained only for legacy experiments that
 need checkpoint/tree-lineage reconstruction.
 
