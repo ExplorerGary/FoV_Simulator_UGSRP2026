@@ -46,6 +46,13 @@ POLICY_DIR="$RESULT_ROOT/02_policy_threshold050"
 QUALITY_DIR="$RESULT_ROOT/03_quality_lut"
 mkdir -p "$VISIBILITY_DIR" "$POLICY_DIR" "$QUALITY_DIR"
 
+echo "Repository: $REPO"
+echo "Trace:      $TRACE"
+echo "Model root: $MODEL_ROOT"
+echo "GT root:    $GT_ROOT"
+echo "Results:    $RESULT_ROOT"
+echo "Interval:   start=$START_TIME duration=$DURATION fps=$FPS"
+
 echo "[1/4] GT PLY -> per-cell visibility"
 "$PYTHON" "$REPO/scripts/generate_standard_ply_visibility.py" \
   --trace "$TRACE" \

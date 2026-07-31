@@ -499,9 +499,15 @@ def main() -> None:
                 )
 
     runtime = time.perf_counter() - started
+    missing_role_counts: dict[str, int] = {}
+    for skipped_record in skipped:
+        for role in skipped_record["missing"]:
+            missing_role_counts[role] = missing_role_counts.get(role, 0) + 1
     metadata = {
         "schema_version": 2,
-        "pipeline_status": "PASS",
+        "pipeline_status": (
+            "PASS" if emitted > 0 else "FAIL_NO_ELIGIBLE_FRAMES"
+        ),
         "visibility_source": "DanceNet3D ground-truth standard PLY",
         "policy_independence": (
             "Neither Base nor E3 content is read while computing visibility; "
@@ -538,6 +544,7 @@ def main() -> None:
             "requested_samples": len(samples),
             "emitted_frames": emitted,
             "skipped_samples": len(skipped),
+            "missing_role_counts": missing_role_counts,
             "skipped": skipped,
         },
         "projection": {
@@ -559,6 +566,13 @@ def main() -> None:
         "output": str(args.output.resolve()),
     }
     metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    if emitted == 0:
+        first_missing = skipped[0]["missing"] if skipped else {}
+        raise RuntimeError(
+            "No eligible frames were emitted. Missing asset counts by role: "
+            f"{missing_role_counts}. First missing paths: {first_missing}. "
+            f"See {metadata_path}"
+        )
     print(f"Wrote visibility: {args.output}")
     print(f"Wrote metadata: {metadata_path}")
 
