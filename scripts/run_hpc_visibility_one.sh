@@ -17,6 +17,7 @@ done
 
 TRACE_STEM="$(basename "${TRACE%.csv}")"
 mkdir -p "$VISIBILITY_ROOT" "$VISIBILITY_ROOT/metadata"
+export PYTHONPATH="$REPO/src${PYTHONPATH:+:$PYTHONPATH}"
 GSPLAT_LIBRARY_PATH="${GSPLAT_LIBRARY_PATH:-$(
   "$PYTHON" -c \
     'import pathlib, gsplat; print(pathlib.Path(gsplat.__file__).resolve().parent.parent)'
