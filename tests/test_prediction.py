@@ -102,6 +102,11 @@ class LinearPredictionTests(unittest.TestCase):
             self.assertEqual(len(summary["split"]["training_traces"]), 4)
             self.assertEqual(len(summary["split"]["test_traces"]), 1)
             self.assertEqual(summary["cell_count"], 2)
+            selected_threshold = summary["horizons"]["200ms"][
+                "threshold_calibration"
+            ]["selected_decision_threshold"]
+            self.assertGreaterEqual(selected_threshold, 0.01)
+            self.assertLessEqual(selected_threshold, 0.5)
             self.assertIn("100ms", summary["horizons"])
             self.assertGreaterEqual(
                 summary["horizons"]["200ms"]["visibility"][

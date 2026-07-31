@@ -108,7 +108,14 @@ class StandardizedRidge:
     def parameter_count(self) -> int:
         return int(self.coefficients.size + self.target_mean.size)
 
-    def save(self, path: Path, *, cell_ids: Sequence[str]) -> None:
+    def save(
+        self,
+        path: Path,
+        *,
+        cell_ids: Sequence[str],
+        decision_threshold: float,
+        target_threshold: float,
+    ) -> None:
         import numpy as np
 
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,6 +132,8 @@ class StandardizedRidge:
             target_contract=np.asarray(
                 ["future_contributing_gaussian_fraction"]
             ),
+            decision_threshold=np.asarray([decision_threshold], dtype=np.float64),
+            target_threshold=np.asarray([target_threshold], dtype=np.float64),
         )
 
 
@@ -343,12 +352,13 @@ def _regression_metrics(
 def _classification_metrics(
     prediction: "np.ndarray",
     target: "np.ndarray",
-    threshold: float,
+    prediction_threshold: float,
+    target_threshold: float,
 ) -> dict[str, float | int]:
     import numpy as np
 
-    predicted = np.clip(prediction, 0.0, 1.0) >= threshold
-    expected = target >= threshold
+    predicted = np.clip(prediction, 0.0, 1.0) >= prediction_threshold
+    expected = target >= target_threshold
     true_positive = int(np.count_nonzero(predicted & expected))
     true_negative = int(np.count_nonzero(~predicted & ~expected))
     false_positive = int(np.count_nonzero(predicted & ~expected))
@@ -371,7 +381,8 @@ def _classification_metrics(
     )
     f1 = 2.0 * precision * recall / (precision + recall) if precision + recall else 0.0
     return {
-        "threshold": threshold,
+        "prediction_threshold": prediction_threshold,
+        "target_threshold": target_threshold,
         "accuracy": (true_positive + true_negative) / total,
         "precision": precision,
         "recall": recall,
@@ -389,12 +400,53 @@ def _classification_metrics(
 def _metrics(
     prediction: "np.ndarray",
     target: "np.ndarray",
-    threshold: float,
+    prediction_threshold: float,
+    target_threshold: float,
 ) -> dict[str, object]:
     return {
         **_regression_metrics(prediction, target),
-        "classification": _classification_metrics(prediction, target, threshold),
+        "classification": _classification_metrics(
+            prediction,
+            target,
+            prediction_threshold,
+            target_threshold,
+        ),
     }
+
+
+def _select_decision_threshold(
+    prediction: "np.ndarray",
+    target: "np.ndarray",
+    *,
+    target_threshold: float,
+    minimum: float,
+    maximum: float,
+    steps: int,
+) -> tuple[float, dict[str, float | int]]:
+    import numpy as np
+
+    candidates = np.linspace(minimum, maximum, steps)
+    scored = [
+        (
+            float(candidate),
+            _classification_metrics(
+                prediction,
+                target,
+                float(candidate),
+                target_threshold,
+            ),
+        )
+        for candidate in candidates
+    ]
+    selected, metrics = max(
+        scored,
+        key=lambda item: (
+            float(item[1]["f1"]),
+            float(item[1]["recall"]),
+            -item[0],
+        ),
+    )
+    return selected, metrics
 
 
 def _concat(examples: Sequence[Examples], field: str) -> "np.ndarray":
@@ -426,6 +478,9 @@ def run_linear_prediction(
     history_ms: int = 500,
     horizons_ms: Sequence[int] = (100, 200, 500),
     visibility_threshold: float = 0.5,
+    decision_threshold_min: float = 0.01,
+    decision_threshold_max: float = 0.5,
+    decision_threshold_steps: int = 50,
     test_fraction: float = 0.2,
     seed: int = 20260731,
     ridge_alpha: float = 1.0,
@@ -436,6 +491,10 @@ def run_linear_prediction(
 
     if not 0.0 <= visibility_threshold <= 1.0:
         raise ValueError("visibility_threshold must be within [0, 1]")
+    if not 0.0 <= decision_threshold_min < decision_threshold_max <= 1.0:
+        raise ValueError("Invalid decision-threshold search range")
+    if decision_threshold_steps < 2:
+        raise ValueError("decision_threshold_steps must be at least 2")
     traces = discover_traces(trace_dir, sequence=sequence, fps=fps)
     if expected_traces is not None and len(traces) != expected_traces:
         raise ValueError(
@@ -455,6 +514,9 @@ def run_linear_prediction(
     }
     train_names, test_names = _split_names(
         [trace.name for trace in traces], test_fraction, seed
+    )
+    threshold_fit_names, calibration_names = _split_names(
+        sorted(train_names), 0.25, seed + 1
     )
 
     visibility_by_name: dict[str, VisibilityFrames] = {}
@@ -491,28 +553,65 @@ def run_linear_prediction(
         }
         training = [examples_by_name[name] for name in sorted(train_names)]
         testing = [examples_by_name[name] for name in sorted(test_names)]
+        threshold_fitting = [
+            examples_by_name[name] for name in sorted(threshold_fit_names)
+        ]
+        calibration = [
+            examples_by_name[name] for name in sorted(calibration_names)
+        ]
+        threshold_model = StandardizedRidge.fit(
+            _concat(threshold_fitting, "features"),
+            _concat(threshold_fitting, "targets"),
+            ridge_alpha,
+        )
+        calibration_y = _concat(calibration, "targets")
+        decision_threshold, calibration_metrics = _select_decision_threshold(
+            threshold_model.predict(_concat(calibration, "features")),
+            calibration_y,
+            target_threshold=visibility_threshold,
+            minimum=decision_threshold_min,
+            maximum=decision_threshold_max,
+            steps=decision_threshold_steps,
+        )
         train_x = _concat(training, "features")
         train_y = _concat(training, "targets")
         model = StandardizedRidge.fit(train_x, train_y, ridge_alpha)
-        model.save(output / f"visibility_model_{horizon_ms}ms.npz", cell_ids=cell_ids)
+        model.save(
+            output / f"visibility_model_{horizon_ms}ms.npz",
+            cell_ids=cell_ids,
+            decision_threshold=decision_threshold,
+            target_threshold=visibility_threshold,
+        )
 
         test_x = _concat(testing, "features")
         test_y = _concat(testing, "targets")
         current = _concat(testing, "current_visibility")
         actual_horizons = _concat(testing, "actual_horizons_s")
-        result = _metrics(model.predict(test_x), test_y, visibility_threshold)
-        baseline = _metrics(current, test_y, visibility_threshold)
+        result = _metrics(
+            model.predict(test_x),
+            test_y,
+            decision_threshold,
+            visibility_threshold,
+        )
+        baseline = _metrics(
+            current,
+            test_y,
+            visibility_threshold,
+            visibility_threshold,
+        )
         per_trace: dict[str, object] = {}
         for name in sorted(test_names):
             example = examples_by_name[name]
             trace_result = _metrics(
                 model.predict(example.features),
                 example.targets,
+                decision_threshold,
                 visibility_threshold,
             )
             trace_baseline = _metrics(
                 example.current_visibility,
                 example.targets,
+                visibility_threshold,
                 visibility_threshold,
             )
             per_trace[name] = {
@@ -529,6 +628,7 @@ def run_linear_prediction(
                     "horizon_ms": horizon_ms,
                     "trace": name,
                     "samples": len(example.features),
+                    "decision_threshold": decision_threshold,
                     "mse": trace_result["mse"],
                     "persistence_mse": trace_baseline["mse"],
                     "accuracy": classification["accuracy"],
@@ -550,6 +650,13 @@ def run_linear_prediction(
             "training_samples": int(len(train_x)),
             "test_samples": int(len(test_x)),
             "model_parameters": model.parameter_count,
+            "threshold_calibration": {
+                "objective": "maximum_f1",
+                "fit_traces": sorted(threshold_fit_names),
+                "calibration_traces": sorted(calibration_names),
+                "selected_decision_threshold": decision_threshold,
+                "calibration_classification": calibration_metrics,
+            },
             "visibility": result,
             "persistence": baseline,
             "per_test_trace": per_trace,
@@ -568,6 +675,13 @@ def run_linear_prediction(
             "history_steps": history_steps,
             "horizons_ms": list(horizon_steps),
             "visibility_threshold": visibility_threshold,
+            "decision_threshold_search": {
+                "minimum": decision_threshold_min,
+                "maximum": decision_threshold_max,
+                "steps": decision_threshold_steps,
+                "selection_data": "two held-out traces within the eight training traces",
+                "final_model_data": "all eight training traces",
+            },
             "ridge_alpha": ridge_alpha,
             "test_fraction": test_fraction,
             "seed": seed,
@@ -598,6 +712,7 @@ def run_linear_prediction(
             "horizon_ms",
             "trace",
             "samples",
+            "decision_threshold",
             "mse",
             "persistence_mse",
             "accuracy",

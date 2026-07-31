@@ -39,15 +39,21 @@ It resamples each trace at 30 fps, unwraps Euler-angle discontinuities for
 interpolation, and flattens 16 poses into 96 input values. Current visibility
 is deliberately not an input. One direct, standardized Ridge linear
 regression predicts every cell's future `contributing_gaussian_fraction` for
-each 100, 200, or 500 ms horizon. Fractions are clipped to `[0, 1]` for MSE
-and thresholded at `0.5` for cell accuracy, precision, recall, balanced
-accuracy, and F1.
+each 100, 200, or 500 ms horizon. Fractions are clipped to `[0, 1]` for MSE.
+Ground-truth visibility remains defined by fraction `>= 0.5`, while the LR
+decision threshold is calibrated separately for every horizon.
 
 Training and testing are split by complete trace file with a fixed seed. For
 the formal ten-trace CircleTurns dataset this produces eight training traces
 and two test traces; no neighboring rows from a test trace can leak into
 training. The primary 200 ms horizon and the 100/500 ms checks are direct
-predictions rather than recursive rollouts.
+predictions rather than recursive rollouts. Within the eight training traces,
+six fit a temporary model and two select the threshold that maximizes F1.
+The final LR is then refit on all eight traces before the two test traces are
+evaluated. The test set never selects a threshold.
+
+The reported persistence baseline is `future visibility = current
+visibility`. It is not trained and current visibility is not an LR input.
 
 Install the prediction dependency and evaluate an existing visibility set:
 
@@ -70,7 +76,7 @@ ten traces and make training depend on the successful array:
 ```bash
 cd ~/FoV_Simulator_UGSRP2026
 mkdir -p /scratch/$USER/fov_visibility_lr/logs
-VIS_JOB=$(sbatch --parsable --array=0-9%10 \
+VIS_JOB=$(sbatch --parsable --array=0-9%2 \
   --output=/scratch/$USER/fov_visibility_lr/logs/visibility-%A_%a.out \
   --error=/scratch/$USER/fov_visibility_lr/logs/visibility-%A_%a.err \
   scripts/slurm_visibility_lr_array.sbatch)
