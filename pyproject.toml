@@ -12,6 +12,7 @@ dependencies = []
 
 [project.optional-dependencies]
 plot = ["matplotlib>=3.7"]
+prediction = ["numpy>=1.24"]
 quality = [
   "numpy>=1.24",
   "Pillow>=10",

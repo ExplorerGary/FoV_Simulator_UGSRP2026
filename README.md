@@ -26,6 +26,69 @@ visibility stage using DanceNet3D GT PLYs and gsplat CUDA. It computes
 front-to-back per-Gaussian `T*alpha` attribution without reading Base or E3.
 The original GSV renderer remains useful for local cross-validation.
 
+## Linear FoV prediction
+
+The `predict-linear` command implements the prediction mechanism used by the
+progressive FoV streamer:
+
+```text
+previous 0.5 seconds of 6DoF -> future per-cell visibility fractions
+```
+
+It resamples each trace at 30 fps, unwraps Euler-angle discontinuities for
+interpolation, and flattens 16 poses into 96 input values. Current visibility
+is deliberately not an input. One direct, standardized Ridge linear
+regression predicts every cell's future `contributing_gaussian_fraction` for
+each 100, 200, or 500 ms horizon. Fractions are clipped to `[0, 1]` for MSE
+and thresholded at `0.5` for cell accuracy, precision, recall, balanced
+accuracy, and F1.
+
+Training and testing are split by complete trace file with a fixed seed. For
+the formal ten-trace CircleTurns dataset this produces eight training traces
+and two test traces; no neighboring rows from a test trace can leak into
+training. The primary 200 ms horizon and the 100/500 ms checks are direct
+predictions rather than recursive rollouts.
+
+Install the prediction dependency and evaluate an existing visibility set:
+
+```bash
+python -m pip install -e ".[prediction]"
+python -m fovsim predict-linear \
+  --trace-dir trace_csvs \
+  --visibility-dir /data/circle_visibility \
+  --output-dir outputs/linear_prediction \
+  --expected-traces 10
+```
+
+Each visibility filename stem must match its trace, for example
+`26_7_29_12_33_39.csv`. Missing cells in a frame are encoded as zero. The
+shared cell ID schema is the union of the ten visibility CSVs.
+
+On the Torch HPC login node, submit complete GT visibility generation for all
+ten traces and make training depend on the successful array:
+
+```bash
+cd ~/FoV_Simulator_UGSRP2026
+mkdir -p /scratch/$USER/fov_visibility_lr/logs
+VIS_JOB=$(sbatch --parsable --array=0-9%10 \
+  --output=/scratch/$USER/fov_visibility_lr/logs/visibility-%A_%a.out \
+  --error=/scratch/$USER/fov_visibility_lr/logs/visibility-%A_%a.err \
+  scripts/slurm_visibility_lr_array.sbatch)
+sbatch --dependency=afterok:$VIS_JOB \
+  --output=/scratch/$USER/fov_visibility_lr/logs/train-%j.out \
+  --error=/scratch/$USER/fov_visibility_lr/logs/train-%j.err \
+  scripts/slurm_linear_visibility_train.sbatch
+```
+
+The visibility array uses all DanceNet3D GT PLY frames and does not filter on
+Base/E3 LUT availability. Every task verifies that emitted visibility frames
+equal requested frames. Training then enforces exactly ten CSVs and writes
+`linear_visibility_summary.json`, `per_trace_metrics.csv`, and one compressed
+`.npz` model per horizon below
+`/scratch/$USER/fov_visibility_lr/linear_prediction`. All metrics include a
+current-visibility persistence baseline for context; that baseline is not a
+model input.
+
 ## Install
 
 ```bash

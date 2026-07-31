@@ -60,6 +60,27 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
         help="One-based index among non-empty manifest rows.",
     )
+
+    predict = subparsers.add_parser(
+        "predict-linear",
+        help="Train/test a direct linear 6DoF and cell-visibility predictor.",
+    )
+    predict.add_argument("--trace-dir", type=Path, required=True)
+    predict.add_argument("--visibility-dir", type=Path, required=True)
+    predict.add_argument("--output-dir", type=Path, required=True)
+    predict.add_argument(
+        "--sequence", default="BiancaGolden_CircleTurns"
+    )
+    predict.add_argument("--fps", type=float, default=30.0)
+    predict.add_argument("--history-ms", type=int, default=500)
+    predict.add_argument(
+        "--horizons-ms", type=int, nargs="+", default=(100, 200, 500)
+    )
+    predict.add_argument("--visibility-threshold", type=float, default=0.5)
+    predict.add_argument("--test-fraction", type=float, default=0.2)
+    predict.add_argument("--seed", type=int, default=20260731)
+    predict.add_argument("--ridge-alpha", type=float, default=1.0)
+    predict.add_argument("--expected-traces", type=int)
     return parser
 
 
@@ -101,6 +122,24 @@ def main() -> None:
         result = run_manifest_line(
             manifest_path=args.manifest,
             one_based_line=args.job_index,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
+    elif args.command == "predict-linear":
+        from .prediction import run_linear_prediction
+
+        result = run_linear_prediction(
+            trace_dir=args.trace_dir,
+            visibility_dir=args.visibility_dir,
+            output_dir=args.output_dir,
+            sequence=args.sequence,
+            fps=args.fps,
+            history_ms=args.history_ms,
+            horizons_ms=args.horizons_ms,
+            visibility_threshold=args.visibility_threshold,
+            test_fraction=args.test_fraction,
+            seed=args.seed,
+            ridge_alpha=args.ridge_alpha,
+            expected_traces=args.expected_traces,
         )
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
