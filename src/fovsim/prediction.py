@@ -50,6 +50,8 @@ class Examples:
     targets: "np.ndarray"
     current_visibility: "np.ndarray"
     actual_horizons_s: "np.ndarray"
+    current_indices: "np.ndarray"
+    target_indices: "np.ndarray"
 
 
 @dataclass(slots=True)
@@ -338,6 +340,8 @@ def _examples(
         targets=visibility_values[target],
         current_visibility=visibility_values[current],
         actual_horizons_s=visibility.times_s[target] - visibility.times_s[current],
+        current_indices=current,
+        target_indices=target,
     )
 
 

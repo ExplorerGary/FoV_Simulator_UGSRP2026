@@ -135,6 +135,58 @@ class LinearPredictionTests(unittest.TestCase):
             )
             self.assertEqual(saved["config"]["history_steps"], 5)
 
+    def test_saved_model_generates_qoe_policy_without_future_labels(self) -> None:
+        import numpy as np
+        from fovsim.predicted_policy import generate_predicted_policy
+        from fovsim.prediction import StandardizedRidge
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            trace = root / "trace.csv"
+            self._write_trace(trace, 0)
+            visibility_paths = []
+            for variant in (0, 1):
+                path = root / f"visibility_{variant}.csv"
+                visibility_paths.append(path)
+                with path.open("w", encoding="utf-8", newline="") as stream:
+                    writer = csv.writer(stream)
+                    writer.writerow([
+                        "output_frame", "output_time_s", "trace_source_row",
+                        "trace_timestamp_s", "gsv_frame", "cell_id",
+                        "contributing_gaussian_fraction",
+                    ])
+                    for frame in range(31):
+                        for cell_id in ("0:0:0", "1:0:0"):
+                            writer.writerow([
+                                frame, frame / 10, frame + 2, frame / 10,
+                                frame, cell_id, float(variant),
+                            ])
+            model = StandardizedRidge(
+                feature_mean=np.zeros(36), feature_scale=np.ones(36),
+                target_mean=np.asarray([0.8, 0.1]), target_scale=np.ones(2),
+                coefficients=np.zeros((36, 2)), alpha=1.0,
+            )
+            model_path = root / "model.npz"
+            model.save(
+                model_path, cell_ids=("0:0:0", "1:0:0"),
+                decision_threshold=0.5, target_threshold=0.5,
+                training_target_mode="binary",
+            )
+            outputs = []
+            for variant, visibility in enumerate(visibility_paths):
+                output = root / f"output_{variant}"
+                summary = generate_predicted_policy(
+                    trace_path=trace, visibility_path=visibility,
+                    model_path=model_path, output_dir=output, fps=10,
+                    history_ms=500, horizon_ms=500,
+                )
+                self.assertFalse(summary["future_visibility_values_used"])
+                outputs.append((output / "cell_decisions.csv").read_text())
+            self.assertEqual(outputs[0], outputs[1])
+            rows = list(csv.DictReader(outputs[0].splitlines()))
+            self.assertEqual({row["target_level"] for row in rows}, {"0", "3"})
+            self.assertEqual([int(row["output_frame"]) for row in rows[:2]], [0, 0])
+
 
 if __name__ == "__main__":
     unittest.main()

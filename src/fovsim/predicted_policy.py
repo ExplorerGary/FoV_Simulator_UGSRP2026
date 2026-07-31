@@ -1,0 +1,185 @@
+"""Convert a saved DoF-only linear predictor into QoE cell decisions."""
+
+from __future__ import annotations
+
+import csv
+import math
+from dataclasses import dataclass
+from pathlib import Path
+
+from .io import write_csv_atomic, write_json_atomic
+from .prediction import (
+    StandardizedRidge,
+    VisibilityFrames,
+    _examples,
+    _load_sampled_trace,
+    load_visibility,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class FrameProvenance:
+    output_frame: int
+    output_time_s: float
+    trace_source_row: int
+    trace_timestamp_s: float
+    gsv_frame: int
+
+
+def _load_provenance(path: Path) -> list[FrameProvenance]:
+    required = {
+        "output_frame", "output_time_s", "trace_source_row",
+        "trace_timestamp_s", "gsv_frame",
+    }
+    frames: dict[int, FrameProvenance] = {}
+    with path.open("r", encoding="utf-8-sig", newline="") as stream:
+        reader = csv.DictReader(stream)
+        missing = required - set(reader.fieldnames or ())
+        if missing:
+            raise ValueError(f"Visibility CSV is missing columns: {sorted(missing)}")
+        for line, raw in enumerate(reader, start=2):
+            try:
+                item = FrameProvenance(
+                    output_frame=int(raw["output_frame"]),
+                    output_time_s=float(raw["output_time_s"]),
+                    trace_source_row=int(raw["trace_source_row"]),
+                    trace_timestamp_s=float(raw["trace_timestamp_s"]),
+                    gsv_frame=int(raw["gsv_frame"]),
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Invalid provenance at {path}:{line}") from exc
+            previous = frames.setdefault(item.output_frame, item)
+            if previous != item:
+                raise ValueError(f"Inconsistent frame metadata at {path}:{line}")
+    ordered = [frames[key] for key in sorted(frames)]
+    if not ordered:
+        raise ValueError(f"No frame provenance in {path}")
+    return ordered
+
+
+def _parse_cell_id(cell_id: str) -> tuple[int, int, int]:
+    try:
+        values = tuple(int(value) for value in cell_id.split(":"))
+    except ValueError as exc:
+        raise ValueError(f"Invalid model cell ID: {cell_id!r}") from exc
+    if len(values) != 3:
+        raise ValueError(f"Invalid model cell ID: {cell_id!r}")
+    return values
+
+
+def _asset_paths(model_root: Path, gt_root: Path, asset_id: int) -> tuple[Path, ...]:
+    frame = f"{asset_id:07d}"
+    return (
+        model_root / "SINGLE" / f"{frame}_aggressive_base_random" / "ply" / "point_cloud_8999.ply",
+        model_root / "EVOGS_V1" / frame / "enhancement_03_enhanced" / "ply" / f"{frame}_enhancement.ply",
+        gt_root / f"{frame}.ply",
+    )
+
+
+def generate_predicted_policy(
+    *, trace_path: Path, visibility_path: Path, model_path: Path,
+    output_dir: Path, sequence: str = "BiancaGolden_CircleTurns",
+    fps: float = 30.0, history_ms: int = 500, horizon_ms: int = 500,
+    model_root: Path | None = None, gt_root: Path | None = None,
+    asset_frame_offset: int = 1,
+) -> dict[str, object]:
+    """Write QoE decisions without consulting future visibility fractions."""
+    import numpy as np
+
+    if (model_root is None) != (gt_root is None):
+        raise ValueError("model_root and gt_root must be supplied together")
+    trace = _load_sampled_trace(trace_path, sequence, fps)
+    if trace is None:
+        raise ValueError(f"Trace does not contain FileName={sequence!r}")
+    # load_visibility supplies timestamps for alignment. Its fraction values are
+    # never used as features or decisions; the empty index makes that invariant
+    # explicit in the generated Examples target matrices.
+    visibility = load_visibility(visibility_path)
+    provenance = _load_provenance(visibility_path)
+    if len(provenance) != len(visibility.times_s):
+        raise ValueError("Visibility/provenance frame count mismatch")
+    history_steps = max(1, int(round(history_ms * fps / 1000.0)))
+    alignment_only = VisibilityFrames(
+        output_frames=visibility.output_frames,
+        times_s=visibility.times_s,
+        values_by_frame=[{} for _ in visibility.values_by_frame],
+    )
+    examples = _examples(
+        trace, alignment_only, {}, fps=fps, history_steps=history_steps,
+        horizon_s=horizon_ms / 1000.0,
+    )
+    with np.load(model_path, allow_pickle=False) as saved:
+        model = StandardizedRidge(
+            feature_mean=saved["feature_mean"], feature_scale=saved["feature_scale"],
+            target_mean=saved["target_mean"], target_scale=saved["target_scale"],
+            coefficients=saved["coefficients"], alpha=float(saved["alpha"][0]),
+        )
+        cell_ids = [str(value) for value in saved["cell_ids"]]
+        threshold = float(saved["decision_threshold"][0])
+    scores = np.clip(model.predict(examples.features), 0.0, 1.0)
+    if scores.shape[1] != len(cell_ids):
+        raise ValueError("Model output dimension does not match its cell IDs")
+
+    # Timestamp gaps can map more than one history to one future frame. Keep the
+    # candidate closest to the requested horizon, yielding one policy per frame.
+    selected: dict[int, int] = {}
+    requested_s = horizon_ms / 1000.0
+    for example_index, target_index in enumerate(examples.target_indices):
+        target = int(target_index)
+        incumbent = selected.get(target)
+        error = abs(float(examples.actual_horizons_s[example_index]) - requested_s)
+        if incumbent is None or error < abs(
+            float(examples.actual_horizons_s[incumbent]) - requested_s
+        ):
+            selected[target] = example_index
+
+    rows: list[dict[str, object]] = []
+    skipped_assets = 0
+    for emitted_frame, (target_index, example_index) in enumerate(sorted(selected.items())):
+        target = provenance[target_index]
+        asset_id = target.gsv_frame + asset_frame_offset
+        if model_root is not None and not all(
+            path.is_file() for path in _asset_paths(model_root, gt_root, asset_id)  # type: ignore[arg-type]
+        ):
+            skipped_assets += 1
+            continue
+        current = provenance[int(examples.current_indices[example_index])]
+        actual_ms = float(examples.actual_horizons_s[example_index] * 1000.0)
+        output_frame = len(rows) // len(cell_ids)
+        for cell_index, cell_id in enumerate(cell_ids):
+            x, y, z = _parse_cell_id(cell_id)
+            score = float(scores[example_index, cell_index])
+            rows.append({
+                "output_frame": output_frame,
+                "source_output_frame": target.output_frame,
+                "output_time_s": target.output_time_s,
+                "trace_source_row": target.trace_source_row,
+                "trace_timestamp_s": target.trace_timestamp_s,
+                "gsv_frame": target.gsv_frame,
+                "asset_frame_id": asset_id,
+                "cell_id": cell_id, "cell_x": x, "cell_y": y, "cell_z": z,
+                "predicted_visibility_score": score,
+                "decision_threshold": threshold,
+                "enhancement_required": int(score >= threshold),
+                "target_level": 3 if score >= threshold else 0,
+                "prediction_current_output_frame": current.output_frame,
+                "prediction_current_trace_timestamp_s": current.trace_timestamp_s,
+                "requested_horizon_ms": horizon_ms,
+                "actual_horizon_ms": actual_ms,
+            })
+    if not rows:
+        raise ValueError("No policy frames remain after alignment/asset filtering")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    write_csv_atomic(output_dir / "cell_decisions.csv", list(rows[0]), rows)
+    frame_count = len(rows) // len(cell_ids)
+    summary = {
+        "status": "PASS", "input_contract": "6dof_history_only",
+        "future_visibility_values_used": False,
+        "trace": trace.name, "history_ms": history_ms, "horizon_ms": horizon_ms,
+        "decision_threshold": threshold, "cell_count": len(cell_ids),
+        "frame_count": frame_count, "skipped_missing_asset_frames": skipped_assets,
+        "mean_selected_cells": sum(int(row["enhancement_required"]) for row in rows) / frame_count,
+        "output": str((output_dir / "cell_decisions.csv").resolve()),
+    }
+    write_json_atomic(output_dir / "prediction_policy_summary.json", summary)
+    return summary

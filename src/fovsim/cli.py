@@ -87,6 +87,21 @@ def _parser() -> argparse.ArgumentParser:
     predict.add_argument("--seed", type=int, default=20260731)
     predict.add_argument("--ridge-alpha", type=float, default=1.0)
     predict.add_argument("--expected-traces", type=int)
+    policy = subparsers.add_parser(
+        "predict-linear-policy",
+        help="Convert a saved DoF-only linear model into QoE cell decisions.",
+    )
+    policy.add_argument("--trace", type=Path, required=True)
+    policy.add_argument("--visibility", type=Path, required=True)
+    policy.add_argument("--model", type=Path, required=True)
+    policy.add_argument("--output-dir", type=Path, required=True)
+    policy.add_argument("--sequence", default="BiancaGolden_CircleTurns")
+    policy.add_argument("--fps", type=float, default=30.0)
+    policy.add_argument("--history-ms", type=int, default=500)
+    policy.add_argument("--horizon-ms", type=int, default=500)
+    policy.add_argument("--model-root", type=Path)
+    policy.add_argument("--gt-root", type=Path)
+    policy.add_argument("--asset-frame-offset", type=int, default=1)
     return parser
 
 
@@ -150,6 +165,17 @@ def main() -> None:
             seed=args.seed,
             ridge_alpha=args.ridge_alpha,
             expected_traces=args.expected_traces,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
+    elif args.command == "predict-linear-policy":
+        from .predicted_policy import generate_predicted_policy
+
+        result = generate_predicted_policy(
+            trace_path=args.trace, visibility_path=args.visibility,
+            model_path=args.model, output_dir=args.output_dir,
+            sequence=args.sequence, fps=args.fps, history_ms=args.history_ms,
+            horizon_ms=args.horizon_ms, model_root=args.model_root,
+            gt_root=args.gt_root, asset_frame_offset=args.asset_frame_offset,
         )
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
