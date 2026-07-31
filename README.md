@@ -80,9 +80,12 @@ sbatch --dependency=afterok:$VIS_JOB \
   scripts/slurm_linear_visibility_train.sbatch
 ```
 
-The visibility array uses all DanceNet3D GT PLY frames and does not filter on
-Base/E3 LUT availability. Every task verifies that emitted visibility frames
-equal requested frames. Training then enforces exactly ten CSVs and writes
+The visibility array uses every available DanceNet3D GT PLY and does not
+filter on Base/E3 LUT availability. Known gaps in the nominal 433-frame GT
+sequence are skipped, while every task verifies full sample accounting, only
+GT-role omissions, and at least 95% sample coverage. LR targets are aligned by
+timestamp, so skipped GT frames do not shift the requested horizon. Training
+then enforces exactly ten CSVs and writes
 `linear_visibility_summary.json`, `per_trace_metrics.csv`, and one compressed
 `.npz` model per horizon below
 `/scratch/$USER/fov_visibility_lr/linear_prediction`. All metrics include a

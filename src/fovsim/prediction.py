@@ -49,6 +49,7 @@ class Examples:
     features: "np.ndarray"
     targets: "np.ndarray"
     current_visibility: "np.ndarray"
+    actual_horizons_s: "np.ndarray"
 
 
 @dataclass(slots=True)
@@ -283,28 +284,49 @@ def _examples(
     *,
     fps: float,
     history_steps: int,
-    horizon_steps: int,
+    horizon_s: float,
 ) -> Examples:
     import numpy as np
 
     visibility_values = _visibility_matrix(visibility, cell_index)
-    indices = np.arange(0, len(visibility_values) - horizon_steps)
     history_offsets = np.arange(history_steps, -1, -1, dtype=np.float64) / fps
     histories: list[np.ndarray] = []
-    valid_indices: list[int] = []
-    for index in indices:
+    current_indices: list[int] = []
+    target_indices: list[int] = []
+    max_target_error_s = 1.1 / fps
+    for index in range(len(visibility_values)):
         history_times = visibility.times_s[index] - history_offsets
         if history_times[0] < trace.times_s[0] - 1e-6:
             continue
+        desired_time = visibility.times_s[index] + horizon_s
+        right = int(np.searchsorted(visibility.times_s, desired_time))
+        candidates = [
+            candidate
+            for candidate in (right - 1, right)
+            if index < candidate < len(visibility.times_s)
+        ]
+        if not candidates:
+            continue
+        target_index = min(
+            candidates,
+            key=lambda candidate: abs(
+                float(visibility.times_s[candidate]) - desired_time
+            ),
+        )
+        if abs(float(visibility.times_s[target_index]) - desired_time) > max_target_error_s:
+            continue
         histories.append(_interpolate_dof(trace, history_times))
-        valid_indices.append(int(index))
+        current_indices.append(index)
+        target_indices.append(target_index)
     if not histories:
         raise ValueError(f"No aligned visibility examples remain for {trace.name}")
-    selected = np.asarray(valid_indices, dtype=np.int64)
+    current = np.asarray(current_indices, dtype=np.int64)
+    target = np.asarray(target_indices, dtype=np.int64)
     return Examples(
-        features=np.stack(histories).reshape(len(selected), -1),
-        targets=visibility_values[selected + horizon_steps],
-        current_visibility=visibility_values[selected],
+        features=np.stack(histories).reshape(len(current), -1),
+        targets=visibility_values[target],
+        current_visibility=visibility_values[current],
+        actual_horizons_s=visibility.times_s[target] - visibility.times_s[current],
     )
 
 
@@ -463,7 +485,7 @@ def run_linear_prediction(
                 cell_index,
                 fps=fps,
                 history_steps=history_steps,
-                horizon_steps=steps,
+                horizon_s=horizon_ms / 1000.0,
             )
             for trace in traces
         }
@@ -477,6 +499,7 @@ def run_linear_prediction(
         test_x = _concat(testing, "features")
         test_y = _concat(testing, "targets")
         current = _concat(testing, "current_visibility")
+        actual_horizons = _concat(testing, "actual_horizons_s")
         result = _metrics(model.predict(test_x), test_y, visibility_threshold)
         baseline = _metrics(current, test_y, visibility_threshold)
         per_trace: dict[str, object] = {}
@@ -518,7 +541,9 @@ def run_linear_prediction(
                 }
             )
         horizon_results[f"{horizon_ms}ms"] = {
-            "actual_horizon_ms": 1000.0 * steps / fps,
+            "mean_actual_horizon_ms": float(1000.0 * np.mean(actual_horizons)),
+            "min_actual_horizon_ms": float(1000.0 * np.min(actual_horizons)),
+            "max_actual_horizon_ms": float(1000.0 * np.max(actual_horizons)),
             "horizon_steps": steps,
             "input_dimension": int(train_x.shape[1]),
             "output_cells": len(cell_ids),

@@ -40,6 +40,7 @@ echo "Visibility: $VISIBILITY_ROOT/$TRACE_STEM.csv"
   --hfov 77 \
   --cell-size-m 0.2 \
   --visibility-weight-threshold 0.00392156862745098 \
+  --skip-missing-assets \
   --device cuda
 
 "$PYTHON" - "$VISIBILITY_ROOT/metadata/$TRACE_STEM.json" <<'PY'
@@ -52,14 +53,24 @@ metadata = json.loads(path.read_text(encoding="utf-8"))
 sampling = metadata["sampling"]
 if metadata["pipeline_status"] != "PASS":
     raise SystemExit(f"Visibility failed: {path}")
-if sampling["emitted_frames"] != sampling["requested_samples"]:
+accounted = sampling["emitted_frames"] + sampling["skipped_samples"]
+if accounted != sampling["requested_samples"]:
     raise SystemExit(
-        "Incomplete visibility: "
-        f"{sampling['emitted_frames']}/{sampling['requested_samples']}"
+        "Unaccounted visibility samples: "
+        f"emitted={sampling['emitted_frames']}, "
+        f"skipped={sampling['skipped_samples']}, "
+        f"requested={sampling['requested_samples']}"
     )
+missing_roles = set(sampling["missing_role_counts"])
+if missing_roles - {"gt"}:
+    raise SystemExit(f"Unexpected missing asset roles: {sorted(missing_roles)}")
+skipped_fraction = sampling["skipped_samples"] / sampling["requested_samples"]
+if skipped_fraction > 0.05:
+    raise SystemExit(f"Too many missing GT samples: {skipped_fraction:.2%}")
 print(
     "Visibility complete: "
-    f"{sampling['emitted_frames']} frames, "
+    f"{sampling['emitted_frames']} emitted, "
+    f"{sampling['skipped_samples']} missing-GT samples skipped, "
     f"{metadata['runtime']['frames_per_second']:.3f} fps"
 )
 PY
