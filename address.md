@@ -3,20 +3,35 @@
 这是跨终端、跨对话使用的稳定地址簿。Slurm job ID、计算节点名和登录
 节点会变化，因此不记录为固定地址。
 
-## Canonical repository
+## Repositories
 
 ```text
-GitHub:
+Gaussian training GitHub:
 https://github.com/ExplorerGary/Gaussian_Coding_UGSRP2026
 
-HPC checkout:
+Gaussian training HPC checkout:
 /home/zg2598/Gaussian_Coding_UGSRP2026
+
+FoV simulator GitHub:
+https://github.com/ExplorerGary/FoV_Simulator_UGSRP2026
+
+FoV simulator HPC checkout:
+/home/zg2598/FoV_Simulator_UGSRP2026
 ```
 
-更新 HPC checkout：
+更新训练仓库：
 
 ```bash
 cd ~/Gaussian_Coding_UGSRP2026
+git switch main
+git pull --ff-only origin main
+git log -1 --oneline
+```
+
+更新 FoV 仿真仓库：
+
+```bash
+cd ~/FoV_Simulator_UGSRP2026
 git switch main
 git pull --ff-only origin main
 git log -1 --oneline
@@ -80,16 +95,16 @@ input-frame directories; absent frame IDs are not training targets.
 
 Frame range is `0000001`–`0001061`, with 1061 input frames.
 
-## Ground-truth PLY datasets
+## Ground-truth PLY datasets and root semantics
 
 ```text
-GT root:
+GT dataset parent:
 /scratch/zg2598/DanceNet3D_GT
 
-CircleTurns:
+CircleTurns sequence directory:
 /scratch/zg2598/DanceNet3D_GT/BiancaGolden_CircleTurns
 
-GrandPlies:
+GrandPlies sequence directory:
 /scratch/zg2598/DanceNet3D_GT/BiancaGolden_GrandPlies
 ```
 
@@ -98,6 +113,29 @@ GT filenames use seven-digit frame IDs, for example:
 ```text
 /scratch/zg2598/DanceNet3D_GT/BiancaGolden_CircleTurns/0000001.ply
 ```
+
+**Important:** two programs use different `--gt-root` semantics:
+
+```text
+Gaussian_Coding/evo_eval.py:
+  --gt-root /scratch/zg2598/DanceNet3D_GT
+  (dataset parent; the script appends the sequence name)
+
+FoV visibility/QoE scripts:
+  --gt-root /scratch/zg2598/DanceNet3D_GT/BiancaGolden_CircleTurns
+  (sequence directory; the script appends only 0000001.ply)
+```
+
+Do not share a generic `GT_ROOT` environment variable between these workflows.
+Use explicit names:
+
+```bash
+export GT_DATASET_ROOT=/scratch/$USER/DanceNet3D_GT
+export GT_SEQUENCE_ROOT="$GT_DATASET_ROOT/BiancaGolden_CircleTurns"
+```
+
+The FoV runner intentionally reads `GT_SEQUENCE_ROOT` and ignores a stale
+training-session `GT_ROOT`.
 
 ## LUT training outputs
 
@@ -128,6 +166,23 @@ $OUTPUT_ROOT/EVOGS_V1/<FRAME>/enhancement_02_enhanced/ply/<FRAME>_enhancement.pl
 Level-3:
 $OUTPUT_ROOT/EVOGS_V1/<FRAME>/enhancement_03_enhanced/ply/<FRAME>_enhancement.ply
 ```
+
+Verified on Torch for CircleTurns:
+
+```text
+GT:
+/scratch/zg2598/DanceNet3D_GT/BiancaGolden_CircleTurns/0000001.ply
+
+Base:
+/scratch/zg2598/DanceNet3D_Out/WORLD_COORD_PROJ_e_BiancaGolden_CircleTurns_LUT/SINGLE/0000001_aggressive_base_random/ply/point_cloud_8999.ply
+
+Enhancement-3 directory:
+/scratch/zg2598/DanceNet3D_Out/WORLD_COORD_PROJ_e_BiancaGolden_CircleTurns_LUT/EVOGS_V1/0000001/enhancement_03_enhanced
+```
+
+The CircleTurns GT sequence directory contains 433 PLY files. The LUT training
+root has the `SINGLE` and `EVOGS_V1` layouts above; only the 426 eligible
+training frame IDs are expected to have complete Base/E3 artifacts.
 
 ## Evo evaluation outputs
 

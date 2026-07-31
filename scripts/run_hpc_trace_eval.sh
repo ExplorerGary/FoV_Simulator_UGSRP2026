@@ -5,7 +5,10 @@ set -euo pipefail
 REPO="${REPO:-$HOME/FoV_Simulator_UGSRP2026}"
 TRACE="${TRACE:-$REPO/trace_csvs/26_7_29_12_33_39.csv}"
 MODEL_ROOT="${MODEL_ROOT:-/scratch/$USER/DanceNet3D_Out/WORLD_COORD_PROJ_e_BiancaGolden_CircleTurns_LUT}"
-GT_ROOT="${GT_ROOT:-/scratch/$USER/DanceNet3D_GT/BiancaGolden_CircleTurns}"
+# Deliberately do not reuse the generic GT_ROOT variable. Gaussian_Coding's
+# evo_eval.py defines GT_ROOT as the parent directory, while this FoV pipeline
+# requires the sequence directory containing seven-digit PLY files.
+GT_SEQUENCE_ROOT="${GT_SEQUENCE_ROOT:-/scratch/$USER/DanceNet3D_GT/BiancaGolden_CircleTurns}"
 RESULT_ROOT="${RESULT_ROOT:-/scratch/$USER/fov_trace_eval/26_7_29_12_33_39}"
 PYTHON="${PYTHON:-/ext3/envs/gsplat-hpc/bin/python}"
 
@@ -24,7 +27,7 @@ if [[ ! -x "$PYTHON" ]]; then
   echo "Python is not executable: $PYTHON" >&2
   exit 2
 fi
-for path in "$REPO" "$TRACE" "$MODEL_ROOT" "$GT_ROOT"; do
+for path in "$REPO" "$TRACE" "$MODEL_ROOT" "$GT_SEQUENCE_ROOT"; do
   if [[ ! -e "$path" ]]; then
     echo "Required path is missing: $path" >&2
     exit 2
@@ -49,14 +52,14 @@ mkdir -p "$VISIBILITY_DIR" "$POLICY_DIR" "$QUALITY_DIR"
 echo "Repository: $REPO"
 echo "Trace:      $TRACE"
 echo "Model root: $MODEL_ROOT"
-echo "GT root:    $GT_ROOT"
+echo "GT sequence: $GT_SEQUENCE_ROOT"
 echo "Results:    $RESULT_ROOT"
 echo "Interval:   start=$START_TIME duration=$DURATION fps=$FPS"
 
 echo "[1/4] GT PLY -> per-cell visibility"
 "$PYTHON" "$REPO/scripts/generate_standard_ply_visibility.py" \
   --trace "$TRACE" \
-  --gt-root "$GT_ROOT" \
+  --gt-root "$GT_SEQUENCE_ROOT" \
   --require-model-assets-root "$MODEL_ROOT" \
   --output "$VISIBILITY_DIR/cell_visibility.csv" \
   --metadata "$VISIBILITY_DIR/run_metadata.json" \
@@ -85,7 +88,7 @@ echo "[3/4] LUT Base/E3/GT -> QoE and bandwidth"
   --trace "$TRACE" \
   --decisions "$POLICY_DIR/cell_decisions.csv" \
   --model-root "$MODEL_ROOT" \
-  --gt-root "$GT_ROOT" \
+  --gt-root "$GT_SEQUENCE_ROOT" \
   --gsplat-library-path "$GSPLAT_LIBRARY_PATH" \
   --output-dir "$QUALITY_DIR" \
   --dataset-variant lut \
