@@ -38,7 +38,15 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def finite_float(value: str) -> float:
+def finite_float(value: str | None) -> float:
+    """Parse one optional metric cell for plotting.
+
+    Foreground metrics are intentionally blank when the reference alpha mask
+    is empty. Infinite PSNR is also valid for identical images. Neither value
+    should abort the plot; matplotlib represents both as a line gap.
+    """
+    if value is None or not value.strip():
+        return math.nan
     result = float(value)
     return result if math.isfinite(result) else math.nan
 
