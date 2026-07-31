@@ -380,6 +380,14 @@ def _classification_metrics(
         else 0.0
     )
     f1 = 2.0 * precision * recall / (precision + recall) if precision + recall else 0.0
+    beta_squared = 4.0
+    f2 = (
+        (1.0 + beta_squared) * precision * recall
+        / (beta_squared * precision + recall)
+        if precision + recall
+        else 0.0
+    )
+    frame_count = int(prediction.shape[0])
     return {
         "prediction_threshold": prediction_threshold,
         "target_threshold": target_threshold,
@@ -389,11 +397,20 @@ def _classification_metrics(
         "specificity": specificity,
         "balanced_accuracy": 0.5 * (recall + specificity),
         "f1": f1,
+        "f2": f2,
         "true_positive": true_positive,
         "true_negative": true_negative,
         "false_positive": false_positive,
         "false_negative": false_negative,
         "positive_fraction": float(np.mean(expected)),
+        "target_visible_cells_per_frame": (
+            true_positive + false_negative
+        ) / frame_count,
+        "predicted_cells_per_frame": (
+            true_positive + false_positive
+        ) / frame_count,
+        "missed_visible_cells_per_frame": false_negative / frame_count,
+        "extra_cells_per_frame": false_positive / frame_count,
     }
 
 
@@ -441,8 +458,9 @@ def _select_decision_threshold(
     selected, metrics = max(
         scored,
         key=lambda item: (
-            float(item[1]["f1"]),
+            float(item[1]["f2"]),
             float(item[1]["recall"]),
+            float(item[1]["f1"]),
             -item[0],
         ),
     )
@@ -635,9 +653,29 @@ def run_linear_prediction(
                     "precision": classification["precision"],
                     "recall": classification["recall"],
                     "f1": classification["f1"],
+                    "f2": classification["f2"],
                     "balanced_accuracy": classification["balanced_accuracy"],
+                    "target_visible_cells_per_frame": classification[
+                        "target_visible_cells_per_frame"
+                    ],
+                    "predicted_cells_per_frame": classification[
+                        "predicted_cells_per_frame"
+                    ],
+                    "missed_visible_cells_per_frame": classification[
+                        "missed_visible_cells_per_frame"
+                    ],
+                    "extra_cells_per_frame": classification[
+                        "extra_cells_per_frame"
+                    ],
                     "persistence_accuracy": baseline_classification["accuracy"],
                     "persistence_f1": baseline_classification["f1"],
+                    "persistence_f2": baseline_classification["f2"],
+                    "persistence_missed_cells_per_frame": baseline_classification[
+                        "missed_visible_cells_per_frame"
+                    ],
+                    "persistence_extra_cells_per_frame": baseline_classification[
+                        "extra_cells_per_frame"
+                    ],
                 }
             )
         horizon_results[f"{horizon_ms}ms"] = {
@@ -651,7 +689,7 @@ def run_linear_prediction(
             "test_samples": int(len(test_x)),
             "model_parameters": model.parameter_count,
             "threshold_calibration": {
-                "objective": "maximum_f1",
+                "objective": "maximum_f2",
                 "fit_traces": sorted(threshold_fit_names),
                 "calibration_traces": sorted(calibration_names),
                 "selected_decision_threshold": decision_threshold,
@@ -719,9 +757,17 @@ def run_linear_prediction(
             "precision",
             "recall",
             "f1",
+            "f2",
             "balanced_accuracy",
+            "target_visible_cells_per_frame",
+            "predicted_cells_per_frame",
+            "missed_visible_cells_per_frame",
+            "extra_cells_per_frame",
             "persistence_accuracy",
             "persistence_f1",
+            "persistence_f2",
+            "persistence_missed_cells_per_frame",
+            "persistence_extra_cells_per_frame",
         ],
         metrics_rows,
     )

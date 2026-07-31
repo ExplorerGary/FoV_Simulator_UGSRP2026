@@ -114,6 +114,14 @@ class LinearPredictionTests(unittest.TestCase):
                 ]["accuracy"],
                 0.0,
             )
+            classification = summary["horizons"]["200ms"]["visibility"][
+                "classification"
+            ]
+            self.assertGreaterEqual(classification["f2"], 0.0)
+            self.assertGreaterEqual(
+                classification["missed_visible_cells_per_frame"], 0.0
+            )
+            self.assertGreaterEqual(classification["extra_cells_per_frame"], 0.0)
             self.assertTrue(
                 (output / "visibility_model_200ms.npz").is_file()
             )

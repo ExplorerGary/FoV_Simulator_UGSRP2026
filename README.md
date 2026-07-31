@@ -48,9 +48,15 @@ the formal ten-trace CircleTurns dataset this produces eight training traces
 and two test traces; no neighboring rows from a test trace can leak into
 training. The primary 200 ms horizon and the 100/500 ms checks are direct
 predictions rather than recursive rollouts. Within the eight training traces,
-six fit a temporary model and two select the threshold that maximizes F1.
+six fit a temporary model and two select the threshold that maximizes F2.
 The final LR is then refit on all eight traces before the two test traces are
 evaluated. The test set never selects a threshold.
+
+F2 weights recall four times as strongly as precision, matching the streaming
+preference to avoid missing visible cells even if some extra cells are sent.
+The CSV therefore reports F1 and F2 plus per-frame target, predicted, missed,
+and extra cell counts. These counts expose the bandwidth/coverage tradeoff
+that raw accuracy hides.
 
 The reported persistence baseline is `future visibility = current
 visibility`. It is not trained and current visibility is not an LR input.
