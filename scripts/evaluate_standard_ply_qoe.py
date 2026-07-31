@@ -157,6 +157,7 @@ def load_decisions(path: Path) -> list[dict[str, Any]]:
         reader = csv.DictReader(stream)
         required = {
             "output_frame",
+            "output_time_s",
             "trace_source_row",
             "trace_timestamp_s",
             "gsv_frame",
@@ -176,6 +177,7 @@ def load_decisions(path: Path) -> list[dict[str, Any]]:
                 output_frame,
                 {
                     "output_frame": output_frame,
+                    "output_time_s": float(raw["output_time_s"]),
                     "trace_source_row": int(raw["trace_source_row"]),
                     "trace_timestamp_s": float(raw["trace_timestamp_s"]),
                     "gsv_frame": int(raw["gsv_frame"]),
@@ -184,11 +186,13 @@ def load_decisions(path: Path) -> list[dict[str, Any]]:
                 },
             )
             identity = (
+                float(raw["output_time_s"]),
                 int(raw["trace_source_row"]),
                 float(raw["trace_timestamp_s"]),
                 int(raw["gsv_frame"]),
             )
             expected = (
+                frame["output_time_s"],
                 frame["trace_source_row"],
                 frame["trace_timestamp_s"],
                 frame["gsv_frame"],
@@ -325,6 +329,19 @@ def build_ply_policy(
         "e3_selected_fraction": float(e3_selected.float().mean()),
     }
     return policy, stats
+
+
+def gaussian_payload_bytes(splats: dict[str, torch.Tensor]) -> int:
+    """Return serialized attribute bytes represented by one standard-Ply row."""
+    count = int(splats["means"].shape[0])
+    if count <= 0:
+        raise ValueError("Cannot infer Gaussian payload size from an empty PLY")
+    total = 0
+    for value in splats.values():
+        if int(value.shape[0]) != count:
+            raise ValueError("PLY tensors do not share one Gaussian dimension")
+        total += value[0].numel() * value.element_size()
+    return int(total)
 
 
 def normalized_quat_to_rotmat(quat: torch.Tensor) -> torch.Tensor:
@@ -1028,6 +1045,7 @@ def main() -> None:
             metadata: dict[str, Any] = {
                 "display_frame": position,
                 "output_frame": decision["output_frame"],
+                "output_time_s": decision["output_time_s"],
                 "trace_source_row": decision["trace_source_row"],
                 "trace_timestamp_s": trace["timestamp_s"],
                 "gsv_frame": decision["gsv_frame"],
@@ -1037,6 +1055,39 @@ def main() -> None:
                 "gt_gaussian_count": int(assets["gt"]["means"].shape[0]),
                 **policy_stats,
             }
+            base_record_bytes = gaussian_payload_bytes(assets["base"])
+            e3_record_bytes = gaussian_payload_bytes(assets["e3"])
+            base_file_bytes = int(spec["paths"]["base"].stat().st_size)
+            e3_file_bytes = int(spec["paths"]["e3"].stat().st_size)
+            selected_e3_payload_bytes = (
+                int(policy_stats["e3_gaussians_inserted"])
+                * e3_record_bytes
+            )
+            policy_transmission_bytes = (
+                base_file_bytes + selected_e3_payload_bytes
+            )
+            full_progressive_bytes = base_file_bytes + e3_file_bytes
+            metadata.update(
+                {
+                    "base_ply_file_bytes": base_file_bytes,
+                    "e3_ply_file_bytes": e3_file_bytes,
+                    "base_gaussian_record_bytes": base_record_bytes,
+                    "e3_gaussian_record_bytes": e3_record_bytes,
+                    "selected_e3_payload_bytes": selected_e3_payload_bytes,
+                    "base_only_transmission_bytes": base_file_bytes,
+                    "policy_transmission_bytes": policy_transmission_bytes,
+                    "full_progressive_transmission_bytes": (
+                        full_progressive_bytes
+                    ),
+                    "policy_savings_vs_full_bytes": (
+                        full_progressive_bytes - policy_transmission_bytes
+                    ),
+                    "policy_savings_vs_full_fraction": (
+                        (full_progressive_bytes - policy_transmission_bytes)
+                        / full_progressive_bytes
+                    ),
+                }
+            )
             for role in ("gt", "e3"):
                 definition = definitions[role]
                 if definition is None:
@@ -1107,6 +1158,15 @@ def main() -> None:
 
     total_seconds = time.perf_counter() - started_total
     timing["output_write_seconds"] += time.perf_counter() - output_started
+    output_time_deltas = np.diff(
+        np.asarray([row["output_time_s"] for row in rows], dtype=np.float64)
+    )
+    positive_output_deltas = output_time_deltas[output_time_deltas > 0.0]
+    inferred_output_fps = (
+        float(1.0 / np.median(positive_output_deltas))
+        if positive_output_deltas.size
+        else None
+    )
     summary = {
         "schema_version": 2,
         "pipeline_status": "PASS",
@@ -1149,6 +1209,53 @@ def main() -> None:
             ),
             "mean_policy_gaussians": float(
                 np.mean([row["policy_gaussian_count"] for row in rows])
+            ),
+        },
+        "bandwidth": {
+            "model": (
+                "Base PLY file once per dynamic frame plus fixed-width E3 "
+                "Gaussian records belonging to selected 0.2 m cells"
+            ),
+            "container_overhead": (
+                "Base PLY header is included; per-cell packet/index headers "
+                "are excluded because the final transport container is not "
+                "yet specified"
+            ),
+            "total_base_only_bytes": int(
+                sum(row["base_only_transmission_bytes"] for row in rows)
+            ),
+            "total_policy_bytes": int(
+                sum(row["policy_transmission_bytes"] for row in rows)
+            ),
+            "total_full_progressive_bytes": int(
+                sum(
+                    row["full_progressive_transmission_bytes"]
+                    for row in rows
+                )
+            ),
+            "policy_savings_vs_full_fraction": float(
+                1.0
+                - sum(row["policy_transmission_bytes"] for row in rows)
+                / sum(
+                    row["full_progressive_transmission_bytes"]
+                    for row in rows
+                )
+            ),
+            "mean_policy_bytes_per_frame": float(
+                np.mean([row["policy_transmission_bytes"] for row in rows])
+            ),
+            "inferred_output_fps": inferred_output_fps,
+            "mean_policy_megabits_per_second": (
+                float(
+                    np.mean(
+                        [row["policy_transmission_bytes"] for row in rows]
+                    )
+                    * 8.0
+                    * inferred_output_fps
+                    / 1_000_000.0
+                )
+                if inferred_output_fps is not None
+                else None
             ),
         },
         "parallelism": {

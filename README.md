@@ -20,9 +20,11 @@ Each simulation job takes:
 2. A per-frame/per-cell visibility CSV exported by the validated POV renderer.
 
 The simulator cross-checks `trace_source_row`, `trace_timestamp_s`, and
-`gsv_frame` before applying the policy. Visibility generation remains a
-separate stage because it requires the full GSV renderer; this repository owns
-the portable policy/evaluation stage.
+`gsv_frame` before applying the policy.
+`scripts/generate_standard_ply_visibility.py` provides the formal HPC
+visibility stage using DanceNet3D GT PLYs and gsplat CUDA. It computes
+front-to-back per-Gaussian `T*alpha` attribution without reading Base or E3.
+The original GSV renderer remains useful for local cross-validation.
 
 ## Install
 
@@ -159,6 +161,39 @@ PNGs. `summary.json` includes throughput and a phase breakdown for asset
 loading, cell-policy composition, GT/E3/policy rendering, metric computation,
 and sample/output writes. CPU workers use bounded look-ahead so PLY parsing
 overlaps GPU work without retaining the whole sequence in memory.
+
+The metrics CSV also reports the simulated transmission payload:
+
+```text
+base_only_transmission_bytes
+policy_transmission_bytes
+full_progressive_transmission_bytes
+policy_savings_vs_full_fraction
+```
+
+The model counts the complete Base PLY plus fixed-width E3 Gaussian records in
+selected cells. It intentionally excludes unspecified network/container
+headers. Generate the joint bandwidth and QoE figure with:
+
+```bash
+python scripts/plot_qoe_bandwidth.py \
+  --metrics outputs/user01/quality/per_frame_metrics.csv \
+  --output outputs/user01/quality/qoe_bandwidth_overview.png
+```
+
+## One-command HPC trace evaluation
+
+Inside an allocated GPU node and the documented Apptainer environment:
+
+```bash
+REPO=$HOME/FoV_Simulator_UGSRP2026 \
+bash scripts/run_hpc_trace_eval.sh
+```
+
+The defaults evaluate `trace_csvs/26_7_29_12_33_39.csv`, sample the tracked
+interval at 30 fps, use the CircleTurns LUT and GT roots from `address.md`,
+skip frame IDs without trained assets, apply threshold 0.5, and write results
+below `/scratch/$USER/fov_trace_eval/26_7_29_12_33_39`.
 
 `scripts/evaluate_evogs_v1.py` is retained only for legacy experiments that
 need checkpoint/tree-lineage reconstruction.

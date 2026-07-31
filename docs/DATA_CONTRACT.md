@@ -125,6 +125,34 @@ Policy = Base Gaussians in non-selected cells
 
 Cell assignment uses the same fixed GSV-local grid as visibility generation.
 
+Per-frame transmission fields are:
+
+```text
+base_ply_file_bytes
+e3_ply_file_bytes
+base_gaussian_record_bytes
+e3_gaussian_record_bytes
+selected_e3_payload_bytes
+base_only_transmission_bytes
+policy_transmission_bytes
+full_progressive_transmission_bytes
+policy_savings_vs_full_bytes
+policy_savings_vs_full_fraction
+```
+
+The simulated progressive payload is:
+
+```text
+Policy bytes = complete Base PLY bytes
+             + selected E3 Gaussian count * E3 record bytes
+
+Full bytes   = complete Base PLY bytes + complete E3 PLY bytes
+```
+
+This is an application-payload estimate. Per-cell packet headers, transport
+headers, retransmission, and entropy coding are excluded until a concrete
+container/protocol is specified.
+
 ## Frame summary
 
 `frame_summary.csv` contains:
