@@ -80,6 +80,9 @@ def _parser() -> argparse.ArgumentParser:
     predict.add_argument("--decision-threshold-min", type=float, default=0.01)
     predict.add_argument("--decision-threshold-max", type=float, default=0.5)
     predict.add_argument("--decision-threshold-steps", type=int, default=50)
+    predict.add_argument(
+        "--target-mode", choices=("fraction", "binary"), default="fraction"
+    )
     predict.add_argument("--test-fraction", type=float, default=0.2)
     predict.add_argument("--seed", type=int, default=20260731)
     predict.add_argument("--ridge-alpha", type=float, default=1.0)
@@ -142,6 +145,7 @@ def main() -> None:
             decision_threshold_min=args.decision_threshold_min,
             decision_threshold_max=args.decision_threshold_max,
             decision_threshold_steps=args.decision_threshold_steps,
+            target_mode=args.target_mode,
             test_fraction=args.test_fraction,
             seed=args.seed,
             ridge_alpha=args.ridge_alpha,

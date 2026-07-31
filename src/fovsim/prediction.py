@@ -115,6 +115,7 @@ class StandardizedRidge:
         cell_ids: Sequence[str],
         decision_threshold: float,
         target_threshold: float,
+        training_target_mode: str,
     ) -> None:
         import numpy as np
 
@@ -134,6 +135,7 @@ class StandardizedRidge:
             ),
             decision_threshold=np.asarray([decision_threshold], dtype=np.float64),
             target_threshold=np.asarray([target_threshold], dtype=np.float64),
+            training_target_mode=np.asarray([training_target_mode]),
         )
 
 
@@ -499,6 +501,7 @@ def run_linear_prediction(
     decision_threshold_min: float = 0.01,
     decision_threshold_max: float = 0.5,
     decision_threshold_steps: int = 50,
+    target_mode: str = "fraction",
     test_fraction: float = 0.2,
     seed: int = 20260731,
     ridge_alpha: float = 1.0,
@@ -513,6 +516,8 @@ def run_linear_prediction(
         raise ValueError("Invalid decision-threshold search range")
     if decision_threshold_steps < 2:
         raise ValueError("decision_threshold_steps must be at least 2")
+    if target_mode not in {"fraction", "binary"}:
+        raise ValueError("target_mode must be 'fraction' or 'binary'")
     traces = discover_traces(trace_dir, sequence=sequence, fps=fps)
     if expected_traces is not None and len(traces) != expected_traces:
         raise ValueError(
@@ -579,7 +584,14 @@ def run_linear_prediction(
         ]
         threshold_model = StandardizedRidge.fit(
             _concat(threshold_fitting, "features"),
-            _concat(threshold_fitting, "targets"),
+            (
+                _concat(threshold_fitting, "targets")
+                if target_mode == "fraction"
+                else (
+                    _concat(threshold_fitting, "targets")
+                    >= visibility_threshold
+                ).astype(np.float64)
+            ),
             ridge_alpha,
         )
         calibration_y = _concat(calibration, "targets")
@@ -592,13 +604,19 @@ def run_linear_prediction(
             steps=decision_threshold_steps,
         )
         train_x = _concat(training, "features")
-        train_y = _concat(training, "targets")
+        train_fraction_targets = _concat(training, "targets")
+        train_y = (
+            train_fraction_targets
+            if target_mode == "fraction"
+            else (train_fraction_targets >= visibility_threshold).astype(np.float64)
+        )
         model = StandardizedRidge.fit(train_x, train_y, ridge_alpha)
         model.save(
             output / f"visibility_model_{horizon_ms}ms.npz",
             cell_ids=cell_ids,
             decision_threshold=decision_threshold,
             target_threshold=visibility_threshold,
+            training_target_mode=target_mode,
         )
 
         test_x = _concat(testing, "features")
@@ -713,6 +731,7 @@ def run_linear_prediction(
             "history_steps": history_steps,
             "horizons_ms": list(horizon_steps),
             "visibility_threshold": visibility_threshold,
+            "training_target_mode": target_mode,
             "decision_threshold_search": {
                 "minimum": decision_threshold_min,
                 "maximum": decision_threshold_max,

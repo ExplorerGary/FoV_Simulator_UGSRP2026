@@ -61,6 +61,22 @@ that raw accuracy hides.
 The reported persistence baseline is `future visibility = current
 visibility`. It is not trained and current visibility is not an LR input.
 
+For the focused 500 ms iteration, the model remains the same single Ridge
+linear layer over raw 6DoF history, but fits binary cell targets instead of
+continuous fractions. Submit the end-to-end wrapper after visibility exists:
+
+```bash
+sbatch \
+  --output=/scratch/$USER/fov_visibility_lr/logs/lr500-%j.out \
+  --error=/scratch/$USER/fov_visibility_lr/logs/lr500-%j.err \
+  scripts/slurm_lr500_iteration.sbatch
+```
+
+The wrapper trains only the 500 ms model, calibrates F2 on training traces,
+evaluates the fixed 8:2 split, compares persistence, and writes a compact
+`lr500_evaluation.json` beside the model and per-trace CSV under
+`/scratch/$USER/fov_visibility_lr/linear_prediction_lr500_binary`.
+
 Install the prediction dependency and evaluate an existing visibility set:
 
 ```bash

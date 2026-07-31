@@ -94,6 +94,7 @@ class LinearPredictionTests(unittest.TestCase):
                 fps=10.0,
                 history_ms=500,
                 horizons_ms=(100, 200),
+                target_mode="binary",
                 seed=7,
                 expected_traces=5,
             )
@@ -102,6 +103,7 @@ class LinearPredictionTests(unittest.TestCase):
             self.assertEqual(len(summary["split"]["training_traces"]), 4)
             self.assertEqual(len(summary["split"]["test_traces"]), 1)
             self.assertEqual(summary["cell_count"], 2)
+            self.assertEqual(summary["config"]["training_target_mode"], "binary")
             selected_threshold = summary["horizons"]["200ms"][
                 "threshold_calibration"
             ]["selected_decision_threshold"]
