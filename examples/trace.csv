@@ -1,0 +1,4 @@
+FileName,LocationX,LocationY,LocationZ,RotationRoll,RotationPitch,RotationYaw,Frame,Timestamp
+circle_turns.gsv,-200.0,0.0,30.0,0.0,0.0,0.0,0,0.000000
+circle_turns.gsv,-199.8,0.1,30.1,0.1,1.0,2.0,1,0.011111
+circle_turns.gsv,-199.5,0.2,30.2,0.2,2.0,4.0,2,0.022222

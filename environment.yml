@@ -1,0 +1,9 @@
+name: fovsim
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - matplotlib>=3.7
+  - pip
+  - pip:
+      - -e .

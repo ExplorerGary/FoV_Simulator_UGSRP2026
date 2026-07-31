@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fov-progressive-sim"
+version = "0.1.0"
+description = "Portable Base/E3 cell-policy simulator for 6DoF Gaussian video traces."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+plot = ["matplotlib>=3.7"]
+quality = [
+  "numpy>=1.24",
+  "Pillow>=10",
+  "plyfile>=1.0",
+  "torchmetrics[image]>=1.4",
+]
+
+[project.scripts]
+fovsim = "fovsim.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

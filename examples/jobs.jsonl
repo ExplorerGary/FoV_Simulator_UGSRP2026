@@ -1,0 +1,2 @@
+{"name":"example_threshold_050","trace":"trace.csv","visibility":"visibility.csv","output_dir":"../outputs/example_threshold_050","threshold":0.5,"first_frame":1,"frame_count":3,"plot":false}
+{"name":"example_threshold_075","trace":"trace.csv","visibility":"visibility.csv","output_dir":"../outputs/example_threshold_075","threshold":0.75,"first_frame":1,"frame_count":3,"plot":false}
