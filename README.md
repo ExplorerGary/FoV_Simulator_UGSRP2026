@@ -195,6 +195,24 @@ interval at 30 fps, use the CircleTurns LUT and GT roots from `address.md`,
 skip frame IDs without trained assets, apply threshold 0.5, and write results
 below `/scratch/$USER/fov_trace_eval/26_7_29_12_33_39`.
 
+To submit the first four CircleTurns traces from the login node, outside the
+Apptainer shell:
+
+```bash
+cd ~/FoV_Simulator_UGSRP2026
+mkdir -p /scratch/$USER/fov_trace_eval/logs
+sbatch --array=0-3%1 \
+  --output=/scratch/$USER/fov_trace_eval/logs/circle-%A_%a.out \
+  --error=/scratch/$USER/fov_trace_eval/logs/circle-%A_%a.err \
+  scripts/slurm_circle_trace_array.sbatch
+```
+
+Each task independently finds the first pose that has left the unchanged
+`(-200, 0, 30)` cm spawn state and has positive gaze confidence, then evaluates
+from that timestamp to the end of that CSV. The `%1` concurrency cap is the
+safe default for a one-H100 allocation; increase it only when the account is
+allowed more simultaneous GPUs.
+
 `scripts/evaluate_evogs_v1.py` is retained only for legacy experiments that
 need checkpoint/tree-lineage reconstruction.
 

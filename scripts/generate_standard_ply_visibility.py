@@ -67,6 +67,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--metadata", type=Path)
     parser.add_argument("--gsplat-library-path", type=Path, required=True)
+    parser.add_argument(
+        "--start-mode",
+        choices=("beginning", "tracked", "tracked-gaze"),
+        default="tracked-gaze",
+        help=(
+            "Automatic trace trim rule used when --start-time is absent "
+            "(default: tracked-gaze)"
+        ),
+    )
     parser.add_argument("--start-time", type=float)
     parser.add_argument("--duration", type=float)
     parser.add_argument("--fps", type=float, default=30.0)
@@ -101,6 +110,7 @@ def load_trace(path: Path) -> list[dict[str, Any]]:
             "RotationRoll",
             "RotationPitch",
             "RotationYaw",
+            "GazeConfidence",
             "Frame",
             "Timestamp",
         }
@@ -125,11 +135,46 @@ def load_trace(path: Path) -> list[dict[str, Any]]:
                             "RotationYaw",
                         )
                     ),
+                    "gaze_confidence": float(raw["GazeConfidence"]),
                 }
             )
     if not result:
         raise ValueError("Trace has no rows")
+    if any(
+        float(current["timestamp_s"]) <= float(previous["timestamp_s"])
+        for previous, current in zip(result, result[1:])
+    ):
+        raise ValueError("Trace timestamps must be strictly increasing")
     return result
+
+
+def is_tracked_pose(row: dict[str, Any]) -> bool:
+    spawn_distance = math.dist(
+        tuple(float(value) for value in row["location_cm"]),
+        (-200.0, 0.0, 30.0),
+    )
+    rotation_magnitude = math.sqrt(
+        sum(float(value) ** 2 for value in row["rotation_rpy"])
+    )
+    return spawn_distance > 1.0 or rotation_magnitude > 1.0
+
+
+def choose_start_time(
+    rows: list[dict[str, Any]],
+    start_mode: str,
+    explicit_start: float | None,
+) -> float:
+    if explicit_start is not None:
+        return float(explicit_start)
+    if start_mode == "beginning":
+        return float(rows[0]["timestamp_s"])
+    for row in rows:
+        if is_tracked_pose(row) and (
+            start_mode == "tracked"
+            or float(row["gaze_confidence"]) > 0.0
+        ):
+            return float(row["timestamp_s"])
+    raise ValueError(f"No row satisfies start mode '{start_mode}'")
 
 
 def sampled_trace_rows(
@@ -371,11 +416,7 @@ def main() -> None:
     if device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested but is unavailable")
     rows = load_trace(args.trace)
-    start_time = (
-        float(args.start_time)
-        if args.start_time is not None
-        else float(rows[0]["timestamp_s"])
-    )
+    start_time = choose_start_time(rows, args.start_mode, args.start_time)
     end_time = (
         min(start_time + float(args.duration), float(rows[-1]["timestamp_s"]))
         if args.duration is not None
@@ -538,6 +579,9 @@ def main() -> None:
             ),
         },
         "sampling": {
+            "start_mode": (
+                "explicit" if args.start_time is not None else args.start_mode
+            ),
             "start_time_s": start_time,
             "end_time_s": end_time,
             "fps": args.fps,

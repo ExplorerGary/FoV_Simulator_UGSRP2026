@@ -4,16 +4,18 @@ set -euo pipefail
 
 REPO="${REPO:-$HOME/FoV_Simulator_UGSRP2026}"
 TRACE="${TRACE:-$REPO/trace_csvs/26_7_29_12_33_39.csv}"
+TRACE_STEM="$(basename "${TRACE%.csv}")"
 MODEL_ROOT="${MODEL_ROOT:-/scratch/$USER/DanceNet3D_Out/WORLD_COORD_PROJ_e_BiancaGolden_CircleTurns_LUT}"
 # Deliberately do not reuse the generic GT_ROOT variable. Gaussian_Coding's
 # evo_eval.py defines GT_ROOT as the parent directory, while this FoV pipeline
 # requires the sequence directory containing seven-digit PLY files.
 GT_SEQUENCE_ROOT="${GT_SEQUENCE_ROOT:-/scratch/$USER/DanceNet3D_GT/BiancaGolden_CircleTurns}"
-RESULT_ROOT="${RESULT_ROOT:-/scratch/$USER/fov_trace_eval/26_7_29_12_33_39}"
+RESULT_ROOT="${RESULT_ROOT:-/scratch/$USER/fov_trace_eval/$TRACE_STEM}"
 PYTHON="${PYTHON:-/ext3/envs/gsplat-hpc/bin/python}"
 
-START_TIME="${START_TIME:-1.156988}"
-DURATION="${DURATION:-57.292860}"
+START_MODE="${START_MODE:-tracked-gaze}"
+START_TIME="${START_TIME:-}"
+DURATION="${DURATION:-}"
 FPS="${FPS:-30}"
 WIDTH="${WIDTH:-1920}"
 HEIGHT="${HEIGHT:-1080}"
@@ -22,6 +24,8 @@ CELL_SIZE_M="${CELL_SIZE_M:-0.2}"
 POLICY_THRESHOLD="${POLICY_THRESHOLD:-0.5}"
 PREFETCH_WORKERS="${PREFETCH_WORKERS:-4}"
 METRIC_BATCH_SIZE="${METRIC_BATCH_SIZE:-4}"
+SEQUENCE_LABEL="${SEQUENCE_LABEL:-CircleTurns}"
+PLOT_TITLE="${PLOT_TITLE:-${SEQUENCE_LABEL}: ${TRACE_STEM} (LUT, threshold=${POLICY_THRESHOLD})}"
 
 if [[ ! -x "$PYTHON" ]]; then
   echo "Python is not executable: $PYTHON" >&2
@@ -54,7 +58,15 @@ echo "Trace:      $TRACE"
 echo "Model root: $MODEL_ROOT"
 echo "GT sequence: $GT_SEQUENCE_ROOT"
 echo "Results:    $RESULT_ROOT"
-echo "Interval:   start=$START_TIME duration=$DURATION fps=$FPS"
+echo "Interval:   mode=$START_MODE start=${START_TIME:-auto} duration=${DURATION:-to-end} fps=$FPS"
+
+TIME_ARGS=(--start-mode "$START_MODE")
+if [[ -n "$START_TIME" ]]; then
+  TIME_ARGS+=(--start-time "$START_TIME")
+fi
+if [[ -n "$DURATION" ]]; then
+  TIME_ARGS+=(--duration "$DURATION")
+fi
 
 echo "[1/4] GT PLY -> per-cell visibility"
 "$PYTHON" "$REPO/scripts/generate_standard_ply_visibility.py" \
@@ -64,8 +76,7 @@ echo "[1/4] GT PLY -> per-cell visibility"
   --output "$VISIBILITY_DIR/cell_visibility.csv" \
   --metadata "$VISIBILITY_DIR/run_metadata.json" \
   --gsplat-library-path "$GSPLAT_LIBRARY_PATH" \
-  --start-time "$START_TIME" \
-  --duration "$DURATION" \
+  "${TIME_ARGS[@]}" \
   --fps "$FPS" \
   --width "$WIDTH" \
   --height "$HEIGHT" \
@@ -107,6 +118,6 @@ echo "[4/4] Render bandwidth + PSNR/SSIM/LPIPS curves"
   --metrics "$QUALITY_DIR/per_frame_metrics.csv" \
   --output "$QUALITY_DIR/qoe_bandwidth_overview.png" \
   --fps "$FPS" \
-  --title "CircleTurns: 26_7_29_12_33_39 (LUT, threshold=0.5)"
+  --title "$PLOT_TITLE"
 
 echo "PASS: $RESULT_ROOT"
