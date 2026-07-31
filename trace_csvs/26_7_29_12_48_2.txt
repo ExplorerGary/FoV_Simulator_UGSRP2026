@@ -1,0 +1,12 @@
+SessionId = 26_7_29_12_48_2
+
+--- Demographics ---
+
+--- Watched Dances ---
+Count = 1
+
+[Dance 1]
+Name = None
+Category = 
+FileIndex = 0
+WatchedAt = 26_7_29_12_48_2
