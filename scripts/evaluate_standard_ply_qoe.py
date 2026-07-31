@@ -31,6 +31,11 @@ from torch.nn import functional as F
 from torchmetrics.functional.image import structural_similarity_index_measure
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
+from fovsim.qoe import (
+    LPIPS_ALEX_MIN_CROP_SIZE,
+    alex_lpips_crop_is_supported,
+)
+
 
 EVOGS_TO_GSV = torch.tensor(
     ((0.0, 0.0, 1.0), (1.0, 0.0, 0.0), (0.0, -1.0, 0.0)),
@@ -581,6 +586,10 @@ def foreground_metric_values(
         return None
     y_slice = definition["y"]
     x_slice = definition["x"]
+    crop_height = int(y_slice.stop) - int(y_slice.start)
+    crop_width = int(x_slice.stop) - int(x_slice.start)
+    if not alex_lpips_crop_is_supported(crop_height, crop_width):
+        return None
     mask = definition["mask"][y_slice, x_slice]
     test_crop = test[:, y_slice, x_slice]
     reference_crop = reference[:, y_slice, x_slice]
@@ -736,9 +745,12 @@ def aggregate_pair(
             "reference": foreground_reference,
             "definition": (
                 "reference alpha >= threshold; masked-pixel PSNR; "
-                "masked tight crop plus context for SSIM/LPIPS"
+                "masked tight crop plus context for SSIM/LPIPS; all "
+                "foreground metrics are N/A when the crop is smaller than "
+                f"{LPIPS_ALEX_MIN_CROP_SIZE} pixels on either axis"
             ),
             "frame_count": len(foreground_rows),
+            "n_a_frame_count": len(rows) - len(foreground_rows),
         },
     }
     if foreground_rows:
@@ -1191,6 +1203,13 @@ def main() -> None:
                 "evaluated on the tight reference-mask bounding box plus pad"
             ),
             "context_pad_pixels": args.foreground_pad_px,
+            "n_a_rule": (
+                "All per-frame foreground metric fields are blank (N/A) "
+                "when the reference mask is empty or its padded crop is "
+                f"smaller than {LPIPS_ALEX_MIN_CROP_SIZE} pixels on either "
+                "axis. Full-frame metrics remain valid."
+            ),
+            "lpips_alex_min_crop_size_pixels": LPIPS_ALEX_MIN_CROP_SIZE,
         },
         "policy": {
             "cell_size_m": args.cell_size_m,

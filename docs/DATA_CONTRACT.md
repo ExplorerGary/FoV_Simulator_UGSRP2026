@@ -116,6 +116,13 @@ masked images cropped to the tight reference-mask bounds plus configurable
 context padding. The CSV also records the GT/E3 mask pixel counts and bounding
 boxes, so every foreground result is auditable.
 
+If the reference mask is empty, or its padded crop is smaller than `32x32`
+and therefore unsupported by AlexNet LPIPS, all four `<pair>_fore_*` fields
+for that pair/frame are left blank (`N/A`). The renderer does not resize or
+artificially enlarge the crop. Full-frame metrics remain available, and
+sequence foreground summaries report both valid `frame_count` and
+`n_a_frame_count` while averaging only valid foreground rows.
+
 The standard-Ply policy is:
 
 ```text
