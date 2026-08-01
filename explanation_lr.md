@@ -303,18 +303,46 @@ V2 t=0.20 和 t=0.25 均被 V1 t=0.20 支配：它们使用更多带宽但 PSNR 
 guard6、Full E3。Guard6 是最接近 Full E3 的 streaming 点，但其改善主要
 来自空间 safety margin，不能归因于 LR feature 本身。
 
-### Gaze matched BNQ（结果待运行）
+### Gaze matched BNQ 结果
 
 新 batch 在完全相同的有效 gaze 时间区间比较：Base-only、Persistence、
 V1 与 raw-gaze LR 的 threshold `0.10/0.15/0.20/0.25`，以及双方的
 threshold 0.20 + guard6。共 12 个 variants × 2 test traces = 24 个 GPU
-tasks。结果产生前不得宣称 gaze 改善了预测或 QoE。
+tasks。
 
 ```bash
 bash scripts/submit_lr500_gaze_bnq_batch.sh
 ```
 
 输出根目录：`/scratch/$USER/fov_lr500_gaze_bnq_v1`。
+
+所有 variants 使用相同的 3401 帧 gaze-valid test interval。完整结果：
+
+| Variant | Mbps | Saving vs Full E3 | PSNR vs GT | ΔPSNR vs Full E3 |
+|---|---:|---:|---:|---:|
+| Base-only | 270.18 | 79.66% | 25.74 dB | -3.52 dB |
+| Persistence | 528.41 | 60.23% | 26.60 dB | -2.67 dB |
+| V1 t=0.10 | 947.62 | 28.67% | 28.20 dB | -1.07 dB |
+| V1 t=0.15 | 824.60 | 37.93% | 27.69 dB | -1.57 dB |
+| V1 t=0.20 | 718.71 | 45.90% | 27.28 dB | -1.98 dB |
+| V1 t=0.25 | 629.87 | 52.59% | 26.88 dB | -2.39 dB |
+| Gaze t=0.10 | 917.24 | 30.96% | 28.06 dB | -1.21 dB |
+| Gaze t=0.15 | 802.60 | 39.59% | 27.59 dB | -1.68 dB |
+| Gaze t=0.20 | 705.73 | 46.88% | 27.17 dB | -2.10 dB |
+| Gaze t=0.25 | 627.78 | 52.75% | 26.90 dB | -2.36 dB |
+| V1 t=0.20 + guard6 | 1025.25 | 22.83% | 28.79 dB | -0.47 dB |
+| Gaze t=0.20 + guard6 | 989.83 | 25.49% | 28.77 dB | -0.50 dB |
+
+同 threshold 下，Gaze LR 通常减少约 2--30 Mbps，但在 t=0.10--0.20
+降低约 0.10--0.14 dB PSNR；按 V1 curve 插值到相同 bitrate 后，两者差异
+大致只有 0.02--0.06 dB。Gaze t=0.25 以略低带宽取得高 0.024 dB PSNR，
+是一个很小的严格改进，但不足以证明普通 Gaze LR 全面优于 V1。
+
+最有价值的是 guard6：Gaze guard 相比 V1 guard 少 35.41 Mbps（约 3.45%），
+PSNR 只低 0.024 dB，同时 SSIM/LPIPS 略好。它相对 Full E3 节省 25.49%，
+仅损失 0.50 dB，是当前最合理的高质量 gaze operating point。谨慎结论是：
+gaze 对普通 threshold policy 的 matched-rate 收益很弱，但可帮助 guard-band
+policy 用近似相同 QoE 进一步减少少量带宽。
 
 BNQ 汇总优先使用每份已完成 QoE `summary.json` 中记录的真实 GT sequence
 路径，不依赖可能被外部项目设置为父目录的通用 `GT_ROOT`。如果统计时某个
@@ -330,8 +358,8 @@ GT PLY 确实已被删除，其他 QoE/带宽字段仍会正常输出；相对 G
 - 所有 cell 的回归损失没有直接按 Gaussian bytes 或画面贡献加权。
 - Threshold calibration 优化 F2，不等同于直接优化 PSNR/bitrate。
 - Guard band 是固定六邻域，没有根据速度或 cell 传输成本自适应。
-- Gaze LR 已实现但尚未取得 HPC 结果；其收益必须在相同 bitrate 下与
-  head-only LR 比较，而不能只看 recall。
+- Gaze LR 的普通 threshold matched-rate 收益很弱；目前主要价值出现在
+  guard6 高质量点，仍需更多非规则转头 trace 验证泛化。
 - DanceNet3D GT 是参考 PLY，不是可直接比较的网络 codec。
 
 ## 10. LR 变更强制检查清单
@@ -362,4 +390,5 @@ GT PLY 确实已被删除，其他 QoE/带宽字段仍会正常输出；相对 G
 | 2026-08-01 | `abceb80` | 建立本文档，作为后续 LR 变更的强制追溯记录。 |
 | 2026-08-01 | `cd69e48` | 记录 V2 cell prediction、完整 BNQ curve、Pareto 与 dominated operating points。 |
 | 2026-08-01 | `b8197dd` | 加入 204 维 raw-head + gaze Ridge LR、有效 gaze 窗口约束及 matched BNQ batch；结果待 HPC。 |
-| 2026-08-01 | this commit | 修复 BNQ summary 继承通用 `GT_ROOT` 父目录的问题，并允许缺失 GT-size 时保留其他汇总指标。 |
+| 2026-08-01 | `d7a2527` | 修复 BNQ summary 继承通用 `GT_ROOT` 父目录的问题，并允许缺失 GT-size 时保留其他汇总指标。 |
+| 2026-08-01 | this commit | 记录 gaze matched BNQ：普通 threshold 近似持平，gaze guard 以近似 QoE 额外减少 35.41 Mbps。 |
