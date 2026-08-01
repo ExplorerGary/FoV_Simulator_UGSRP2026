@@ -117,6 +117,17 @@ bash scripts/submit_lr500_gaze_bnq_batch.sh
 This submits gaze training, a 24-task matched V1/gaze BNQ array, and a summary
 job under `/scratch/$USER/fov_lr500_gaze_bnq_v1`.
 
+For the 100 ms LR-V2 candidate (500 ms history, F2 and recall-constrained
+thresholds, matched Head/Gaze/Persistence/guard6 BNQ evaluation), submit the
+complete dependency chain from an HPC login node:
+
+```bash
+bash scripts/submit_lr100_bnq_batch.sh
+```
+
+The final automatic report is
+`/scratch/$USER/fov_lr100_bnq_v1/bnq_summary.csv`.
+
 Install the prediction dependency and evaluate an existing visibility set:
 
 ```bash

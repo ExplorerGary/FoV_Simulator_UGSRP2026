@@ -350,6 +350,31 @@ GT PLY 确实已被删除，其他 QoE/带宽字段仍会正常输出；相对 G
 留空，并在 `gt_size_status`/`missing_gt_asset_ids` 中明确标记，避免用不完整
 分母产生错误百分比。
 
+### LR-V2 100 ms iteration（待 HPC 结果）
+
+本轮只把 prediction horizon 从 500 ms 缩短到 100 ms；history 仍为 500 ms（16 帧），以隔离
+预测距离变化的影响。`raw_gaze` 中的 gaze extrapolation 使用实际 `horizon_s=0.1`，因此不会
+错误地用 500 ms gaze 外推预测 100 ms target。模型仍是 `alpha=1.0` 的多输出 Ridge LR，
+binary target、8:2 trace split 与 gaze-valid matched window 均保持不变。
+
+训练集内部同时产生两个 threshold：
+
+- `f2`：在 calibration traces 上最大化 F2，并保存进 NPZ；
+- `safe`：在 calibration recall 至少为 0.85 的候选中选择最高 threshold，从而在满足覆盖率
+  约束时尽量少传 cell。若搜索范围内无法达到 0.85，则明确标记 `constraint_met=false`，使用
+  calibration recall 最高的候选继续完成评测，避免丢失整组 BNQ 结果。
+
+完整 batch 评测 Base-only、100 ms Persistence、Head/Gaze F2、Head/Gaze safe，以及 Head/Gaze
+F2 + guard6，共 8 variants × 2 test traces。最终汇总自动报告 cell MSE/precision/recall/F1/F2、
+Gaussian-count reduction、byte reduction、full-frame 和 foreground QoE。该实验尚未运行，因此
+本节不预先声明任何性能收益。
+
+```bash
+bash scripts/submit_lr100_bnq_batch.sh
+```
+
+默认输出目录：`/scratch/$USER/fov_lr100_bnq_v1`。
+
 ## 9. 已知限制
 
 - 只有 10 条、且全部是 CircleTurns，跨用户和跨运动类型泛化尚未验证。
@@ -392,3 +417,5 @@ GT PLY 确实已被删除，其他 QoE/带宽字段仍会正常输出；相对 G
 | 2026-08-01 | `b8197dd` | 加入 204 维 raw-head + gaze Ridge LR、有效 gaze 窗口约束及 matched BNQ batch；结果待 HPC。 |
 | 2026-08-01 | `d7a2527` | 修复 BNQ summary 继承通用 `GT_ROOT` 父目录的问题，并允许缺失 GT-size 时保留其他汇总指标。 |
 | 2026-08-01 | this commit | 记录 gaze matched BNQ：普通 threshold 近似持平，gaze guard 以近似 QoE 额外减少 35.41 Mbps。 |
+| 2026-08-01 | pending | 将 `raw_gaze`、threshold 0.20、guard6 operating point 归档为 `LR-V1`；记录最终 guard-policy 分类指标和 Gaussian-count reduction。 |
+| 2026-08-01 | pending | 加入 LR-V2 100 ms candidate：保留 500 ms history，新增 recall-constrained threshold，并提交 Head/Gaze、Persistence、guard6 的完整 BNQ dependency chain；结果待 HPC。 |

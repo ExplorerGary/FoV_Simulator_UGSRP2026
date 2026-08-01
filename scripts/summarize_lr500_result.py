@@ -12,13 +12,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--horizon-ms", type=int, default=500)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     summary = json.loads(args.summary.read_text(encoding="utf-8"))
-    horizon = summary["horizons"]["500ms"]
+    horizon = summary["horizons"][f"{args.horizon_ms}ms"]
     model = horizon["visibility"]
     persistence = horizon["persistence"]
     model_classification = model["classification"]
@@ -28,13 +29,16 @@ def main() -> None:
         "mechanism": summary["mechanism"],
         "training_target_mode": summary["config"]["training_target_mode"],
         "history_ms": summary["config"]["history_ms"],
-        "requested_horizon_ms": 500,
+        "requested_horizon_ms": args.horizon_ms,
         "mean_actual_horizon_ms": horizon["mean_actual_horizon_ms"],
         "training_traces": summary["split"]["training_traces"],
         "test_traces": summary["split"]["test_traces"],
         "decision_threshold": horizon["threshold_calibration"][
             "selected_decision_threshold"
         ],
+        "safe_threshold_calibration": horizon.get(
+            "safe_threshold_calibration"
+        ),
         "model": {
             "mse_against_fraction_target": model["mse"],
             **model_classification,

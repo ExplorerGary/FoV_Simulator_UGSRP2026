@@ -12,6 +12,28 @@ NUMPY_AVAILABLE = importlib.util.find_spec("numpy") is not None
 
 @unittest.skipUnless(NUMPY_AVAILABLE, "prediction extra requires numpy")
 class LinearPredictionTests(unittest.TestCase):
+    def test_recall_constrained_threshold_uses_highest_feasible_value(self) -> None:
+        import numpy as np
+        from fovsim.prediction import _select_recall_constrained_threshold
+
+        prediction = np.asarray([[0.9, 0.8, 0.3, 0.2]])
+        target = np.asarray([[1.0, 1.0, 0.0, 0.0]])
+        threshold, metrics, constraint_met = (
+            _select_recall_constrained_threshold(
+                prediction,
+                target,
+                target_threshold=0.5,
+                minimum=0.1,
+                maximum=0.9,
+                steps=9,
+                minimum_recall=1.0,
+            )
+        )
+        self.assertTrue(constraint_met)
+        self.assertAlmostEqual(threshold, 0.8)
+        self.assertEqual(metrics["recall"], 1.0)
+        self.assertEqual(metrics["precision"], 1.0)
+
     @staticmethod
     def _write_trace(path: Path, trace_index: int) -> None:
         with path.open("w", encoding="utf-8", newline="") as stream:
@@ -108,6 +130,7 @@ class LinearPredictionTests(unittest.TestCase):
                 feature_mode="raw_gaze",
                 seed=7,
                 expected_traces=5,
+                safe_recall_target=0.85,
             )
 
             self.assertEqual(summary["status"], "PASS")
@@ -121,6 +144,16 @@ class LinearPredictionTests(unittest.TestCase):
             ]["selected_decision_threshold"]
             self.assertGreaterEqual(selected_threshold, 0.01)
             self.assertLessEqual(selected_threshold, 0.5)
+            safe = summary["horizons"]["200ms"][
+                "safe_threshold_calibration"
+            ]
+            self.assertEqual(safe["minimum_recall"], 0.85)
+            self.assertGreaterEqual(
+                safe["selected_decision_threshold"], 0.01
+            )
+            self.assertLessEqual(
+                safe["selected_decision_threshold"], 0.5
+            )
             self.assertIn("100ms", summary["horizons"])
             self.assertGreaterEqual(
                 summary["horizons"]["200ms"]["visibility"][

@@ -686,6 +686,53 @@ def _select_decision_threshold(
     return selected, metrics
 
 
+def _select_recall_constrained_threshold(
+    prediction: "np.ndarray",
+    target: "np.ndarray",
+    *,
+    target_threshold: float,
+    minimum: float,
+    maximum: float,
+    steps: int,
+    minimum_recall: float,
+) -> tuple[float, dict[str, float | int], bool]:
+    """Choose the highest threshold that still meets a recall floor."""
+    import numpy as np
+
+    scored = [
+        (
+            float(candidate),
+            _classification_metrics(
+                prediction, target, float(candidate), target_threshold
+            ),
+        )
+        for candidate in np.linspace(minimum, maximum, steps)
+    ]
+    feasible = [
+        item for item in scored
+        if float(item[1]["recall"]) >= minimum_recall
+    ]
+    if feasible:
+        selected, metrics = max(
+            feasible,
+            key=lambda item: (
+                item[0],
+                float(item[1]["precision"]),
+                float(item[1]["f1"]),
+            ),
+        )
+        return selected, metrics, True
+    selected, metrics = max(
+        scored,
+        key=lambda item: (
+            float(item[1]["recall"]),
+            float(item[1]["precision"]),
+            item[0],
+        ),
+    )
+    return selected, metrics, False
+
+
 def _concat(examples: Sequence[Examples], field: str) -> "np.ndarray":
     import numpy as np
 
@@ -725,6 +772,7 @@ def run_linear_prediction(
     expected_traces: int | None = None,
     feature_mode: str = "raw_history",
     require_valid_gaze_history: bool = False,
+    safe_recall_target: float | None = None,
 ) -> dict[str, object]:
     """Fit direct DoF-history-to-cell-visibility regressors."""
     import numpy as np
@@ -735,6 +783,8 @@ def run_linear_prediction(
         raise ValueError("Invalid decision-threshold search range")
     if decision_threshold_steps < 2:
         raise ValueError("decision_threshold_steps must be at least 2")
+    if safe_recall_target is not None and not 0.0 <= safe_recall_target <= 1.0:
+        raise ValueError("safe_recall_target must be within [0, 1]")
     if target_mode not in {"fraction", "binary"}:
         raise ValueError("target_mode must be 'fraction' or 'binary'")
     if feature_mode not in {
@@ -820,14 +870,37 @@ def run_linear_prediction(
             ridge_alpha,
         )
         calibration_y = _concat(calibration, "targets")
+        calibration_prediction = threshold_model.predict(
+            _concat(calibration, "features")
+        )
         decision_threshold, calibration_metrics = _select_decision_threshold(
-            threshold_model.predict(_concat(calibration, "features")),
+            calibration_prediction,
             calibration_y,
             target_threshold=visibility_threshold,
             minimum=decision_threshold_min,
             maximum=decision_threshold_max,
             steps=decision_threshold_steps,
         )
+        safe_calibration = None
+        if safe_recall_target is not None:
+            safe_threshold, safe_metrics, constraint_met = (
+                _select_recall_constrained_threshold(
+                    calibration_prediction,
+                    calibration_y,
+                    target_threshold=visibility_threshold,
+                    minimum=decision_threshold_min,
+                    maximum=decision_threshold_max,
+                    steps=decision_threshold_steps,
+                    minimum_recall=safe_recall_target,
+                )
+            )
+            safe_calibration = {
+                "objective": "highest_threshold_meeting_minimum_recall",
+                "minimum_recall": safe_recall_target,
+                "constraint_met": constraint_met,
+                "selected_decision_threshold": safe_threshold,
+                "calibration_classification": safe_metrics,
+            }
         train_x = _concat(training, "features")
         train_fraction_targets = _concat(training, "targets")
         train_y = (
@@ -939,6 +1012,7 @@ def run_linear_prediction(
                 "selected_decision_threshold": decision_threshold,
                 "calibration_classification": calibration_metrics,
             },
+            "safe_threshold_calibration": safe_calibration,
             "visibility": result,
             "persistence": baseline,
             "per_test_trace": per_trace,
@@ -960,6 +1034,7 @@ def run_linear_prediction(
             "training_target_mode": target_mode,
             "feature_mode": feature_mode,
             "require_valid_gaze_history": require_valid_gaze_history,
+            "safe_recall_target": safe_recall_target,
             "decision_threshold_search": {
                 "minimum": decision_threshold_min,
                 "maximum": decision_threshold_max,

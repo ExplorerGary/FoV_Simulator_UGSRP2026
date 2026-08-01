@@ -81,6 +81,14 @@ def _parser() -> argparse.ArgumentParser:
     predict.add_argument("--decision-threshold-max", type=float, default=0.5)
     predict.add_argument("--decision-threshold-steps", type=int, default=50)
     predict.add_argument(
+        "--safe-recall-target",
+        type=float,
+        help=(
+            "Also report the highest calibration threshold meeting this "
+            "minimum recall; the saved model still uses the F2 threshold."
+        ),
+    )
+    predict.add_argument(
         "--target-mode", choices=("fraction", "binary"), default="fraction"
     )
     predict.add_argument("--test-fraction", type=float, default=0.2)
@@ -181,6 +189,7 @@ def main() -> None:
             expected_traces=args.expected_traces,
             feature_mode=args.feature_mode,
             require_valid_gaze_history=args.require_valid_gaze_history,
+            safe_recall_target=args.safe_recall_target,
         )
         print(json.dumps(result, indent=2, sort_keys=True))
     elif args.command == "predict-linear-policy":
