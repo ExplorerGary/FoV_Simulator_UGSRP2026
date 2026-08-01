@@ -14,18 +14,29 @@ VARIANTS = (
 )
 
 
-def gt_bytes(decisions: Path, gt_root: Path) -> int:
+def gt_bytes(
+    decisions: Path, gt_roots: list[Path]
+) -> tuple[int, set[int]]:
     assets: dict[int, int] = {}
     with decisions.open("r", encoding="utf-8-sig", newline="") as stream:
         for row in csv.DictReader(stream):
             assets.setdefault(int(row["output_frame"]), int(row["asset_frame_id"]))
-    return sum((gt_root / f"{asset:07d}.ply").stat().st_size for asset in assets.values())
+    total = 0
+    missing: set[int] = set()
+    for asset in assets.values():
+        candidates = [root / f"{asset:07d}.ply" for root in gt_roots]
+        path = next((candidate for candidate in candidates if candidate.is_file()), None)
+        if path is None:
+            missing.add(asset)
+        else:
+            total += path.stat().st_size
+    return total, missing
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
-    parser.add_argument("--gt-root", type=Path, required=True)
+    parser.add_argument("--gt-root", type=Path)
     parser.add_argument("--variants", nargs="+", default=VARIANTS)
     parser.add_argument(
         "--experiment",
@@ -41,6 +52,7 @@ def main() -> None:
         fore_pixels = 0
         fore_error_sum = fore_ssim_weighted = fore_lpips_weighted = 0.0
         trace_details = {}
+        missing_gt_assets: set[int] = set()
         for trace in TRACES:
             trace_root = args.root / variant / trace
             qoe = json.loads((trace_root / "02_bandwidth_qoe" / "summary.json").read_text())
@@ -52,9 +64,17 @@ def main() -> None:
             frame_count += frames
             policy_bytes += int(bandwidth["total_policy_bytes"])
             full_bytes += int(bandwidth["total_full_progressive_bytes"])
-            raw_gt_bytes += gt_bytes(
-                trace_root / "01_policy" / "cell_decisions.csv", args.gt_root
+            recorded_gt_root = Path(qoe["settings"]["gt_root"])
+            gt_roots = [recorded_gt_root]
+            if args.gt_root is not None:
+                gt_roots.extend(
+                    [args.gt_root, args.gt_root / "BiancaGolden_CircleTurns"]
+                )
+            trace_gt_bytes, trace_missing = gt_bytes(
+                trace_root / "01_policy" / "cell_decisions.csv", gt_roots
             )
+            raw_gt_bytes += trace_gt_bytes
+            missing_gt_assets.update(trace_missing)
             selected_weighted += float(policy["mean_selected_cells"]) * frames
             full_mse_weighted += float(comparison["full"]["mean_mse"]) * frames
             e3_mse_weighted += float(e3["full"]["mean_mse"]) * frames
@@ -76,7 +96,15 @@ def main() -> None:
             "mean_selected_cells": selected_weighted / frame_count,
             "policy_mbps": policy_bytes / frame_count * 30 * 8 / 1_000_000,
             "savings_vs_full_e3": 1.0 - policy_bytes / full_bytes,
-            "savings_vs_dancenet3d_gt": 1.0 - policy_bytes / raw_gt_bytes,
+            "savings_vs_dancenet3d_gt": (
+                None
+                if missing_gt_assets or raw_gt_bytes == 0
+                else 1.0 - policy_bytes / raw_gt_bytes
+            ),
+            "gt_size_status": "incomplete" if missing_gt_assets else "complete",
+            "missing_gt_asset_ids": " ".join(
+                f"{asset:07d}" for asset in sorted(missing_gt_assets)
+            ),
             "policy_vs_gt_psnr_db": -10.0 * math.log10(mse),
             "full_e3_vs_gt_psnr_db": -10.0 * math.log10(e3_mse),
             "psnr_delta_vs_full_e3_db": -10.0 * math.log10(mse) + 10.0 * math.log10(e3_mse),

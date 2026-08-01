@@ -316,6 +316,12 @@ bash scripts/submit_lr500_gaze_bnq_batch.sh
 
 输出根目录：`/scratch/$USER/fov_lr500_gaze_bnq_v1`。
 
+BNQ 汇总优先使用每份已完成 QoE `summary.json` 中记录的真实 GT sequence
+路径，不依赖可能被外部项目设置为父目录的通用 `GT_ROOT`。如果统计时某个
+GT PLY 确实已被删除，其他 QoE/带宽字段仍会正常输出；相对 GT 的节省字段
+留空，并在 `gt_size_status`/`missing_gt_asset_ids` 中明确标记，避免用不完整
+分母产生错误百分比。
+
 ## 9. 已知限制
 
 - 只有 10 条、且全部是 CircleTurns，跨用户和跨运动类型泛化尚未验证。
@@ -355,4 +361,5 @@ bash scripts/submit_lr500_gaze_bnq_batch.sh
 | 2026-08-01 | `df9bb8c` | 加入 147 维 motion-aware quadratic LR、threshold sweep、Base/Persistence 和完整 BNQ batch。 |
 | 2026-08-01 | `abceb80` | 建立本文档，作为后续 LR 变更的强制追溯记录。 |
 | 2026-08-01 | `cd69e48` | 记录 V2 cell prediction、完整 BNQ curve、Pareto 与 dominated operating points。 |
-| 2026-08-01 | this commit | 加入 204 维 raw-head + gaze Ridge LR、有效 gaze 窗口约束及 matched BNQ batch；结果待 HPC。 |
+| 2026-08-01 | `b8197dd` | 加入 204 维 raw-head + gaze Ridge LR、有效 gaze 窗口约束及 matched BNQ batch；结果待 HPC。 |
+| 2026-08-01 | this commit | 修复 BNQ summary 继承通用 `GT_ROOT` 父目录的问题，并允许缺失 GT-size 时保留其他汇总指标。 |
