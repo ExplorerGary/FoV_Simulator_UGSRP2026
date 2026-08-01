@@ -1,6 +1,7 @@
 import csv
 import importlib.util
 import json
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,12 +25,17 @@ class LinearPredictionTests(unittest.TestCase):
                     "RotationRoll",
                     "RotationPitch",
                     "RotationYaw",
+                    "GazeHitX",
+                    "GazeHitY",
+                    "GazeHitZ",
+                    "GazeConfidence",
                     "Frame",
                     "Timestamp",
                 ]
             )
             for frame in range(31):
                 time_s = frame / 10.0
+                yaw_radians = math.radians(179.0 + 4.0 * time_s)
                 writer.writerow(
                     [
                         "BiancaGolden_CircleTurns",
@@ -39,6 +45,10 @@ class LinearPredictionTests(unittest.TestCase):
                         0.1 * time_s,
                         2.0 * time_s,
                         179.0 + 4.0 * time_s,
+                        math.cos(yaw_radians),
+                        math.sin(yaw_radians),
+                        0.0,
+                        0.998,
                         frame,
                         time_s,
                     ]
@@ -95,7 +105,7 @@ class LinearPredictionTests(unittest.TestCase):
                 history_ms=500,
                 horizons_ms=(100, 200),
                 target_mode="binary",
-                feature_mode="motion_quadratic",
+                feature_mode="raw_gaze",
                 seed=7,
                 expected_traces=5,
             )
@@ -105,7 +115,7 @@ class LinearPredictionTests(unittest.TestCase):
             self.assertEqual(len(summary["split"]["test_traces"]), 1)
             self.assertEqual(summary["cell_count"], 2)
             self.assertEqual(summary["config"]["training_target_mode"], "binary")
-            self.assertEqual(summary["config"]["feature_mode"], "motion_quadratic")
+            self.assertEqual(summary["config"]["feature_mode"], "raw_gaze")
             selected_threshold = summary["horizons"]["200ms"][
                 "threshold_calibration"
             ]["selected_decision_threshold"]
@@ -249,6 +259,62 @@ class LinearPredictionTests(unittest.TestCase):
                 history_ms=500, horizon_ms=500, policy_mode="persistence",
             )
             self.assertEqual(persistence["mean_selected_cells"], 1.0)
+
+    def test_motion_gaze_features_and_saved_policy(self) -> None:
+        import numpy as np
+        from fovsim.predicted_policy import generate_predicted_policy
+        from fovsim.prediction import StandardizedRidge, _history_features
+
+        histories = np.arange(4 * 6 * 6, dtype=float).reshape(4, 6, 6)
+        gaze = np.zeros((4, 6, 3), dtype=float)
+        gaze[:, :, 0] = 1.0
+        features = _history_features(
+            histories, fps=10.0, horizon_s=0.5,
+            feature_mode="motion_gaze", gaze_histories=gaze,
+        )
+        self.assertEqual(features.shape, (4, 135))
+        raw_gaze_features = _history_features(
+            histories, fps=10.0, horizon_s=0.5,
+            feature_mode="raw_gaze", gaze_histories=gaze,
+        )
+        self.assertEqual(raw_gaze_features.shape, (4, 84))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            trace = root / "trace.csv"
+            visibility = root / "visibility.csv"
+            self._write_trace(trace, 0)
+            with visibility.open("w", encoding="utf-8", newline="") as stream:
+                writer = csv.writer(stream)
+                writer.writerow([
+                    "output_frame", "output_time_s", "trace_source_row",
+                    "trace_timestamp_s", "gsv_frame", "cell_id",
+                    "contributing_gaussian_fraction",
+                ])
+                for frame in range(31):
+                    writer.writerow([
+                        frame, frame / 10, frame + 2, frame / 10,
+                        frame, "0:0:0", 1.0,
+                    ])
+            model = StandardizedRidge(
+                feature_mean=np.zeros(84), feature_scale=np.ones(84),
+                target_mean=np.asarray([0.8]), target_scale=np.ones(1),
+                coefficients=np.zeros((84, 1)), alpha=1.0,
+            )
+            model_path = root / "gaze_model.npz"
+            model.save(
+                model_path, cell_ids=("0:0:0",), decision_threshold=0.5,
+                target_threshold=0.5, training_target_mode="binary",
+                feature_mode="raw_gaze",
+            )
+            result = generate_predicted_policy(
+                trace_path=trace, visibility_path=visibility,
+                model_path=model_path, output_dir=root / "policy", fps=10,
+                history_ms=500, horizon_ms=500,
+            )
+            self.assertEqual(result["feature_mode"], "raw_gaze")
+            self.assertEqual(result["input_contract"], "6dof_and_gaze_history")
+            self.assertEqual(result["mean_selected_cells"], 1.0)
 
 
 if __name__ == "__main__":

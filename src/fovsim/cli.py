@@ -89,9 +89,10 @@ def _parser() -> argparse.ArgumentParser:
     predict.add_argument("--expected-traces", type=int)
     predict.add_argument(
         "--feature-mode",
-        choices=("raw_history", "motion_quadratic"),
+        choices=("raw_history", "motion_quadratic", "motion_gaze", "raw_gaze"),
         default="raw_history",
     )
+    predict.add_argument("--require-valid-gaze-history", action="store_true")
     policy = subparsers.add_parser(
         "predict-linear-policy",
         help="Convert a saved DoF-only linear model into QoE cell decisions.",
@@ -114,6 +115,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     policy.add_argument("--decision-threshold", type=float)
     policy.add_argument("--guard-band-steps", type=int, default=0)
+    policy.add_argument("--require-valid-gaze-history", action="store_true")
     return parser
 
 
@@ -178,6 +180,7 @@ def main() -> None:
             ridge_alpha=args.ridge_alpha,
             expected_traces=args.expected_traces,
             feature_mode=args.feature_mode,
+            require_valid_gaze_history=args.require_valid_gaze_history,
         )
         print(json.dumps(result, indent=2, sort_keys=True))
     elif args.command == "predict-linear-policy":
@@ -192,6 +195,7 @@ def main() -> None:
             policy_mode=args.policy_mode,
             decision_threshold=args.decision_threshold,
             guard_band_steps=args.guard_band_steps,
+            require_valid_gaze_history=args.require_valid_gaze_history,
         )
         print(json.dumps(result, indent=2, sort_keys=True))
     else:

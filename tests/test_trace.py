@@ -36,6 +36,21 @@ class TraceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Repeated CSV header"):
                 load_trace(trace)
 
+    def test_optional_gaze_direction_is_parsed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            trace = Path(temporary) / "gaze.csv"
+            trace.write_text(
+                "FileName,LocationX,LocationY,LocationZ,RotationRoll,"
+                "RotationPitch,RotationYaw,GazeHitX,GazeHitY,GazeHitZ,"
+                "GazeConfidence,Frame,Timestamp\n"
+                "x.gsv,0,0,0,0,0,0,1,0,0,0.998,0,0\n"
+                "x.gsv,0,0,0,0,0,0,1,0,0,0.998,1,1\n",
+                encoding="utf-8",
+            )
+            rows, _ = load_trace(trace)
+            self.assertEqual(rows[0].gaze_direction, (1.0, 0.0, 0.0))
+            self.assertEqual(rows[0].gaze_confidence, 0.998)
+
 
 if __name__ == "__main__":
     unittest.main()

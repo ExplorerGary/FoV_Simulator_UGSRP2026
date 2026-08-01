@@ -21,6 +21,9 @@ REQUIRED_TRACE_COLUMNS = frozenset(
         "Timestamp",
     }
 )
+GAZE_TRACE_COLUMNS = frozenset(
+    {"GazeHitX", "GazeHitY", "GazeHitZ", "GazeConfidence"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +34,8 @@ class TraceRow:
     rotation_rpy_degrees: tuple[float, float, float]
     gsv_frame: int
     timestamp_s: float
+    gaze_direction: tuple[float, float, float] | None = None
+    gaze_confidence: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +88,13 @@ def load_trace(path: str | Path) -> tuple[list[TraceRow], TraceSummary]:
         missing = sorted(REQUIRED_TRACE_COLUMNS - fieldnames)
         if missing:
             raise ValueError(f"Trace is missing required columns: {missing}")
+        present_gaze = GAZE_TRACE_COLUMNS & fieldnames
+        if present_gaze and present_gaze != GAZE_TRACE_COLUMNS:
+            raise ValueError(
+                "Trace has an incomplete gaze schema; expected columns: "
+                f"{sorted(GAZE_TRACE_COLUMNS)}"
+            )
+        has_gaze = present_gaze == GAZE_TRACE_COLUMNS
 
         for source_row, raw in enumerate(reader, start=2):
             if raw.get("FileName") == "FileName":
@@ -104,6 +116,20 @@ def load_trace(path: str | Path) -> tuple[list[TraceRow], TraceSummary]:
                 ),
                 gsv_frame=_nonnegative_int(raw, "Frame", source_row),
                 timestamp_s=_finite_float(raw, "Timestamp", source_row),
+                gaze_direction=(
+                    (
+                        _finite_float(raw, "GazeHitX", source_row),
+                        _finite_float(raw, "GazeHitY", source_row),
+                        _finite_float(raw, "GazeHitZ", source_row),
+                    )
+                    if has_gaze
+                    else None
+                ),
+                gaze_confidence=(
+                    _finite_float(raw, "GazeConfidence", source_row)
+                    if has_gaze
+                    else None
+                ),
             )
             if rows and row.timestamp_s <= rows[-1].timestamp_s:
                 raise ValueError(

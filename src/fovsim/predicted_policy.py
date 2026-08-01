@@ -84,6 +84,7 @@ def generate_predicted_policy(
     policy_mode: str = "linear",
     decision_threshold: float | None = None,
     guard_band_steps: int = 0,
+    require_valid_gaze_history: bool = False,
 ) -> dict[str, object]:
     """Write QoE decisions without consulting future visibility fractions."""
     import numpy as np
@@ -137,6 +138,7 @@ def generate_predicted_policy(
         trace, example_visibility, example_cells, fps=fps,
         history_steps=history_steps, horizon_s=horizon_ms / 1000.0,
         feature_mode=feature_mode,
+        require_valid_gaze_history=require_valid_gaze_history,
     )
     if policy_mode == "linear":
         scores = np.clip(model.predict(examples.features), 0.0, 1.0)
@@ -226,7 +228,11 @@ def generate_predicted_policy(
         "policy_mode": policy_mode,
         "feature_mode": feature_mode,
         "input_contract": (
-            "6dof_history_only" if policy_mode == "linear"
+            (
+                "6dof_and_gaze_history"
+                if feature_mode in {"motion_gaze", "raw_gaze"}
+                else "6dof_history_only"
+            ) if policy_mode == "linear"
             else "current_visibility" if policy_mode == "persistence"
             else "none"
         ),
@@ -235,6 +241,7 @@ def generate_predicted_policy(
         "decision_threshold": threshold,
         "saved_decision_threshold": saved_threshold,
         "guard_band_steps": guard_band_steps,
+        "require_valid_gaze_history": require_valid_gaze_history,
         "cell_count": len(cell_ids),
         "frame_count": frame_count, "skipped_missing_asset_frames": skipped_assets,
         "mean_selected_cells": sum(int(row["enhancement_required"]) for row in rows) / frame_count,

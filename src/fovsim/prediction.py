@@ -35,6 +35,8 @@ class SampledTrace:
     effective_fps: float
     times_s: "np.ndarray"
     dof: "np.ndarray"
+    gaze_direction: "np.ndarray | None"
+    gaze_confidence: "np.ndarray | None"
 
 
 @dataclass(slots=True)
@@ -132,7 +134,13 @@ class StandardizedRidge:
             coefficients=self.coefficients,
             alpha=np.asarray([self.alpha], dtype=np.float64),
             cell_ids=np.asarray(cell_ids),
-            input_contract=np.asarray(["6dof_history_only"]),
+            input_contract=np.asarray(
+                [
+                    "6dof_and_gaze_history"
+                    if feature_mode in {"motion_gaze", "raw_gaze"}
+                    else "6dof_history_only"
+                ]
+            ),
             target_contract=np.asarray(
                 ["future_contributing_gaussian_fraction"]
             ),
@@ -172,6 +180,32 @@ def _load_sampled_trace(path: Path, sequence: str, fps: float) -> SampledTrace |
     sampled = np.column_stack(
         [np.interp(times, timestamps, source_dof[:, column]) for column in range(6)]
     )
+    gaze_direction = None
+    gaze_confidence = None
+    if selected[0].gaze_direction is not None:
+        source_gaze = np.asarray(
+            [row.gaze_direction for row in selected], dtype=np.float64
+        )
+        source_confidence = np.asarray(
+            [row.gaze_confidence for row in selected], dtype=np.float64
+        )
+        norms = np.linalg.norm(source_gaze, axis=1)
+        valid = (source_confidence >= 0.5) & (norms > 0.5)
+        if np.any(valid):
+            normalized = source_gaze[valid] / norms[valid, None]
+            valid_times = timestamps[valid]
+            gaze_direction = np.column_stack(
+                [
+                    np.interp(times, valid_times, normalized[:, column])
+                    for column in range(3)
+                ]
+            )
+            sampled_norms = np.linalg.norm(gaze_direction, axis=1)
+            gaze_direction /= np.maximum(sampled_norms[:, None], 1e-12)
+            gaze_confidence = np.interp(times, timestamps, source_confidence)
+            gaze_confidence[
+                (times < valid_times[0]) | (times > valid_times[-1])
+            ] = 0.0
     return SampledTrace(
         name=path.stem,
         path=path,
@@ -180,6 +214,8 @@ def _load_sampled_trace(path: Path, sequence: str, fps: float) -> SampledTrace |
         effective_fps=(len(selected) - 1) / duration,
         times_s=times,
         dof=sampled,
+        gaze_direction=gaze_direction,
+        gaze_confidence=gaze_confidence,
     )
 
 
@@ -292,6 +328,26 @@ def _interpolate_dof(trace: SampledTrace, times_s: "np.ndarray") -> "np.ndarray"
     )
 
 
+def _interpolate_gaze(
+    trace: SampledTrace, times_s: "np.ndarray"
+) -> tuple["np.ndarray", "np.ndarray"]:
+    import numpy as np
+
+    if trace.gaze_direction is None or trace.gaze_confidence is None:
+        raise ValueError(f"Trace {trace.name} has no gaze direction data")
+    gaze = np.column_stack(
+        [
+            np.interp(times_s, trace.times_s, trace.gaze_direction[:, column])
+            for column in range(3)
+        ]
+    )
+    norms = np.linalg.norm(gaze, axis=1)
+    gaze /= np.maximum(norms[:, None], 1e-12)
+    confidence = np.interp(times_s, trace.times_s, trace.gaze_confidence)
+    valid = (confidence >= 0.5) & (norms > 0.5)
+    return gaze, valid
+
+
 def _examples(
     trace: SampledTrace,
     visibility: VisibilityFrames,
@@ -301,15 +357,23 @@ def _examples(
     history_steps: int,
     horizon_s: float,
     feature_mode: str = "raw_history",
+    require_valid_gaze_history: bool = False,
 ) -> Examples:
     import numpy as np
 
     visibility_values = _visibility_matrix(visibility, cell_index)
     history_offsets = np.arange(history_steps, -1, -1, dtype=np.float64) / fps
     histories: list[np.ndarray] = []
+    gaze_histories: list[np.ndarray] = []
     current_indices: list[int] = []
     target_indices: list[int] = []
     max_target_error_s = 1.1 / fps
+    needs_gaze = (
+        feature_mode in {"motion_gaze", "raw_gaze"}
+        or require_valid_gaze_history
+    )
+    if needs_gaze and trace.gaze_direction is None:
+        raise ValueError(f"Trace {trace.name} has no gaze required by this run")
     for index in range(len(visibility_values)):
         history_times = visibility.times_s[index] - history_offsets
         if history_times[0] < trace.times_s[0] - 1e-6:
@@ -331,7 +395,14 @@ def _examples(
         )
         if abs(float(visibility.times_s[target_index]) - desired_time) > max_target_error_s:
             continue
+        gaze_history = None
+        if needs_gaze:
+            gaze_history, gaze_valid = _interpolate_gaze(trace, history_times)
+            if not bool(np.all(gaze_valid)):
+                continue
         histories.append(_interpolate_dof(trace, history_times))
+        if gaze_history is not None:
+            gaze_histories.append(gaze_history)
         current_indices.append(index)
         target_indices.append(target_index)
     if not histories:
@@ -345,6 +416,9 @@ def _examples(
             fps=fps,
             horizon_s=horizon_s,
             feature_mode=feature_mode,
+            gaze_histories=(
+                np.stack(gaze_histories) if gaze_histories else None
+            ),
         ),
         targets=visibility_values[target],
         current_visibility=visibility_values[current],
@@ -360,15 +434,17 @@ def _history_features(
     fps: float,
     horizon_s: float,
     feature_mode: str,
+    gaze_histories: "np.ndarray | None" = None,
 ) -> "np.ndarray":
     """Build fixed features while keeping Ridge as the only learned model."""
     import numpy as np
 
     if feature_mode == "raw_history":
         return histories.reshape(len(histories), -1)
-    if feature_mode != "motion_quadratic":
+    if feature_mode not in {"motion_quadratic", "motion_gaze", "raw_gaze"}:
         raise ValueError(
-            "feature_mode must be 'raw_history' or 'motion_quadratic'"
+            "feature_mode must be raw_history, motion_quadratic, "
+            "motion_gaze, or raw_gaze"
         )
     if histories.shape[1] < 2:
         raise ValueError("motion_quadratic requires at least two history samples")
@@ -401,7 +477,7 @@ def _history_features(
         for right in range(left, 6)
     ]
     quadratic = np.column_stack(quadratic_columns)
-    return np.concatenate(
+    motion_features = np.concatenate(
         [
             current,
             relative_history.reshape(len(histories), -1),
@@ -414,6 +490,72 @@ def _history_features(
         ],
         axis=1,
     )
+    if feature_mode == "motion_quadratic":
+        return motion_features
+    if gaze_histories is None or gaze_histories.shape[:2] != histories.shape[:2]:
+        raise ValueError("motion_gaze requires aligned gaze histories")
+    gaze_current = gaze_histories[:, -1, :]
+    gaze_relative = gaze_histories[:, :-1, :] - gaze_current[:, None, :]
+    gaze_long_velocity = (
+        gaze_current - gaze_histories[:, 0, :]
+    ) / history_duration
+    gaze_short_velocity = (
+        gaze_current - gaze_histories[:, -1 - short_steps, :]
+    ) / short_duration
+    if gaze_histories.shape[1] >= 2 * short_steps + 1:
+        earlier_gaze_velocity = (
+            gaze_histories[:, -1 - short_steps, :]
+            - gaze_histories[:, -1 - 2 * short_steps, :]
+        ) / short_duration
+        gaze_acceleration = (
+            gaze_short_velocity - earlier_gaze_velocity
+        ) / short_duration
+    else:
+        gaze_acceleration = np.zeros_like(gaze_short_velocity)
+    projected_gaze = (
+        gaze_current
+        + gaze_short_velocity * horizon_s
+        + 0.5 * gaze_acceleration * horizon_s * horizon_s
+    )
+    projected_gaze /= np.maximum(
+        np.linalg.norm(projected_gaze, axis=1, keepdims=True), 1e-12
+    )
+    pitch = np.deg2rad(histories[:, :, 4])
+    yaw = np.deg2rad(histories[:, :, 5])
+    forward = np.stack(
+        [np.cos(pitch) * np.cos(yaw), np.cos(pitch) * np.sin(yaw), np.sin(pitch)],
+        axis=2,
+    )
+    right = np.stack(
+        [-np.sin(yaw), np.cos(yaw), np.zeros_like(yaw)], axis=2
+    )
+    up = np.cross(forward, right)
+    head_local_gaze = np.stack(
+        [
+            np.sum(gaze_histories * forward, axis=2),
+            np.sum(gaze_histories * right, axis=2),
+            np.sum(gaze_histories * up, axis=2),
+        ],
+        axis=2,
+    )
+    gaze_features = np.concatenate(
+        [
+            gaze_current,
+            gaze_relative.reshape(len(histories), -1),
+            gaze_long_velocity,
+            gaze_short_velocity,
+            gaze_acceleration,
+            projected_gaze,
+            head_local_gaze.reshape(len(histories), -1),
+        ],
+        axis=1,
+    )
+    head_features = (
+        histories.reshape(len(histories), -1)
+        if feature_mode == "raw_gaze"
+        else motion_features
+    )
+    return np.concatenate([head_features, gaze_features], axis=1)
 
 
 def _regression_metrics(
@@ -582,6 +724,7 @@ def run_linear_prediction(
     ridge_alpha: float = 1.0,
     expected_traces: int | None = None,
     feature_mode: str = "raw_history",
+    require_valid_gaze_history: bool = False,
 ) -> dict[str, object]:
     """Fit direct DoF-history-to-cell-visibility regressors."""
     import numpy as np
@@ -594,7 +737,9 @@ def run_linear_prediction(
         raise ValueError("decision_threshold_steps must be at least 2")
     if target_mode not in {"fraction", "binary"}:
         raise ValueError("target_mode must be 'fraction' or 'binary'")
-    if feature_mode not in {"raw_history", "motion_quadratic"}:
+    if feature_mode not in {
+        "raw_history", "motion_quadratic", "motion_gaze", "raw_gaze"
+    }:
         raise ValueError("Invalid feature_mode")
     traces = discover_traces(trace_dir, sequence=sequence, fps=fps)
     if expected_traces is not None and len(traces) != expected_traces:
@@ -650,6 +795,7 @@ def run_linear_prediction(
                 history_steps=history_steps,
                 horizon_s=horizon_ms / 1000.0,
                 feature_mode=feature_mode,
+                require_valid_gaze_history=require_valid_gaze_history,
             )
             for trace in traces
         }
@@ -801,7 +947,7 @@ def run_linear_prediction(
     summary: dict[str, object] = {
         "status": "PASS",
         "mechanism": (
-            "direct standardized ridge regression from 6DoF history only to "
+            "direct standardized ridge regression from historical inputs to "
             "future per-cell contributing_gaussian_fraction"
         ),
         "sequence": sequence,
@@ -813,6 +959,7 @@ def run_linear_prediction(
             "visibility_threshold": visibility_threshold,
             "training_target_mode": target_mode,
             "feature_mode": feature_mode,
+            "require_valid_gaze_history": require_valid_gaze_history,
             "decision_threshold_search": {
                 "minimum": decision_threshold_min,
                 "maximum": decision_threshold_max,

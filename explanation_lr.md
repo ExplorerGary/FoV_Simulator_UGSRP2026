@@ -6,10 +6,11 @@
 
 ## 1. 一句话定义
 
-当前正式机制是：
+当前已经完成正式 BNQ 的机制是 head-only；新增、待 HPC 验证的 gaze
+iteration 为：
 
 ```text
-过去 500 ms 的 6DoF
+过去 500 ms 的 6DoF + gaze direction
         ↓
 固定的 motion-aware 特征变换
         ↓
@@ -22,10 +23,11 @@ threshold / 可选空间 guard band
 该 cell 发送 Base-only 或 Base + E3
 ```
 
-所以“6DoF 直接预测 cell visibility”是正确的。更精确地说，模型没有先预测
-未来 DoF 再调用几何可见性计算，而是从 6DoF history 一步映射到未来所有
-cell 的 score。训练 visibility 是监督标签；正式 LR 推理不读取当前或未来
-visibility。
+Head-only 版本中“6DoF 直接预测 cell visibility”是正确的。Gaze 版本则是
+“历史 6DoF + 历史 gaze 直接预测 cell visibility”。模型没有先预测未来
+DoF 再调用几何可见性计算，而是一步映射到未来所有 cell 的 score。训练
+visibility 是监督标签；正式 LR 推理不读取当前或未来 visibility，gaze 也
+只来自当前时刻及之前。
 
 ## 2. 数据契约
 
@@ -54,10 +56,21 @@ fraction <  0.5  -> 0
 - 时间对齐按 timestamp 寻找最接近 `current + 500 ms` 的有效 visibility
   frame；允许的最大误差为约 1.1 个采样间隔。
 
+### Gaze 输入
+
+- Trace 已包含 `GazeHitX/Y/Z` 和 `GazeConfidence`。
+- `GazeHitXYZ` 实测模长约为 1，因此按 world-space unit direction 处理，而
+  不是三维 hit position。
+- 正式 10 条 trace 中 `confidence >= 0.5` 且 gaze 非零的样本占 98.49%；
+  有效 confidence 约为 0.998。
+- 起始约 1.14 秒 gaze 尚未初始化。Gaze LR 和其所有公平对照都要求完整
+  500 ms gaze history 有效；无效窗口直接跳过，不把零向量当正常 gaze。
+- 有效 gaze 在插值后重新单位化。
+
 ### 严禁的数据泄漏
 
-正式 LR inference 的 feature 只能来自历史 6DoF。以下数据不得成为 LR
-feature：
+Head-only LR inference 只能来自历史 6DoF；gaze iteration 只能额外读取历史
+gaze direction。以下数据不得成为 LR feature：
 
 - 当前 cell visibility；
 - 未来 cell visibility；
@@ -131,6 +144,27 @@ engineering，以便显式表达 500 ms 运动趋势。
 二阶项使它也可以称为 polynomial Ridge regression，但所有基函数都是固定
 的，唯一学习的部分仍是线性系数，因此没有跳出 LR 范畴。
 
+### V3: `raw_gaze`（待 HPC 评测）
+
+为了单独测量 gaze 的增益，V3 不叠加表现不稳定的 V2 head-motion feature。
+它保留 V1 的 96 维 raw head history，并加入 108 维 gaze feature：
+
+| Feature group | 维度 |
+|---|---:|
+| V1 raw head history | 96 |
+| 当前 world-space gaze | 3 |
+| 前 15 个 gaze 相对当前 gaze 的差 | 45 |
+| gaze 长期/短期速度 | 6 |
+| gaze 加速度 | 3 |
+| 单位化的 500 ms gaze 外推方向 | 3 |
+| 16 帧 gaze 在 head forward/right/up basis 中的坐标 | 48 |
+| 总计 | 204 |
+
+Head basis 使用 trace 的 pitch/yaw 构造；样本检查表明其 forward 与记录的
+world gaze 坐标方向一致。Batch 会在相同 gaze-valid history 窗口重新训练
+V1 baseline；V1 和 V3 均使用 `alpha=1.0`、相同 binary target 和相同 trace
+split，因此主要差异是 gaze feature。
+
 ## 5. 学习器
 
 设 feature matrix 为 `X`，所有 cell target 为 `Y`：
@@ -149,6 +183,9 @@ W = (XᵀX + αI)⁻¹ XᵀY
 V1 正式模型使用 `α=1.0`；V2 BNQ iteration 使用 `α=3.0`。模型保存为 NPZ，
 包括 feature mean/scale、target mean/scale、系数、cell IDs、feature mode、
 target mode 和校准 threshold。
+
+V3 gaze model 使用 `α=1.0`，保存的 input contract 是
+`6dof_and_gaze_history`。
 
 代码入口：
 
@@ -266,6 +303,19 @@ V2 t=0.20 和 t=0.25 均被 V1 t=0.20 支配：它们使用更多带宽但 PSNR 
 guard6、Full E3。Guard6 是最接近 Full E3 的 streaming 点，但其改善主要
 来自空间 safety margin，不能归因于 LR feature 本身。
 
+### Gaze matched BNQ（结果待运行）
+
+新 batch 在完全相同的有效 gaze 时间区间比较：Base-only、Persistence、
+V1 与 raw-gaze LR 的 threshold `0.10/0.15/0.20/0.25`，以及双方的
+threshold 0.20 + guard6。共 12 个 variants × 2 test traces = 24 个 GPU
+tasks。结果产生前不得宣称 gaze 改善了预测或 QoE。
+
+```bash
+bash scripts/submit_lr500_gaze_bnq_batch.sh
+```
+
+输出根目录：`/scratch/$USER/fov_lr500_gaze_bnq_v1`。
+
 ## 9. 已知限制
 
 - 只有 10 条、且全部是 CircleTurns，跨用户和跨运动类型泛化尚未验证。
@@ -274,8 +324,8 @@ guard6、Full E3。Guard6 是最接近 Full E3 的 streaming 点，但其改善�
 - 所有 cell 的回归损失没有直接按 Gaussian bytes 或画面贡献加权。
 - Threshold calibration 优化 F2，不等同于直接优化 PSNR/bitrate。
 - Guard band 是固定六邻域，没有根据速度或 cell 传输成本自适应。
-- Trace 已含高覆盖率 gaze unit direction，但尚未作为 LR feature；其收益
-  必须在相同 bitrate 下与 head-only LR 比较，而不能只看 recall。
+- Gaze LR 已实现但尚未取得 HPC 结果；其收益必须在相同 bitrate 下与
+  head-only LR 比较，而不能只看 recall。
 - DanceNet3D GT 是参考 PLY，不是可直接比较的网络 codec。
 
 ## 10. LR 变更强制检查清单
@@ -304,4 +354,5 @@ guard6、Full E3。Guard6 是最接近 Full E3 的 streaming 点，但其改善�
 | 2026-07-31 | `fefee92` | 将 LR decisions 接入 bandwidth 与 QoE renderer。 |
 | 2026-08-01 | `df9bb8c` | 加入 147 维 motion-aware quadratic LR、threshold sweep、Base/Persistence 和完整 BNQ batch。 |
 | 2026-08-01 | `abceb80` | 建立本文档，作为后续 LR 变更的强制追溯记录。 |
-| 2026-08-01 | this commit | 记录 V2 cell prediction、完整 BNQ curve、Pareto 与 dominated operating points。 |
+| 2026-08-01 | `cd69e48` | 记录 V2 cell prediction、完整 BNQ curve、Pareto 与 dominated operating points。 |
+| 2026-08-01 | this commit | 加入 204 维 raw-head + gaze Ridge LR、有效 gaze 窗口约束及 matched BNQ batch；结果待 HPC。 |

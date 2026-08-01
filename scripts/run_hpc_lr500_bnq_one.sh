@@ -7,6 +7,7 @@ POLICY_MODE="${POLICY_MODE:-linear}"
 MODEL="${MODEL:?MODEL is required}"
 DECISION_THRESHOLD="${DECISION_THRESHOLD:-}"
 GUARD_BAND_STEPS="${GUARD_BAND_STEPS:-0}"
+REQUIRE_VALID_GAZE_HISTORY="${REQUIRE_VALID_GAZE_HISTORY:-0}"
 TRACE_STEM="$(basename "${TRACE%.csv}")"
 EXPERIMENT_ROOT="${EXPERIMENT_ROOT:-/scratch/$USER/fov_visibility_lr}"
 VISIBILITY="$EXPERIMENT_ROOT/visibility/$TRACE_STEM.csv"
@@ -27,12 +28,14 @@ QUALITY_DIR="$RESULT_ROOT/02_bandwidth_qoe"
 mkdir -p "$POLICY_DIR" "$QUALITY_DIR"
 THRESHOLD_ARGS=()
 [[ -z "$DECISION_THRESHOLD" ]] || THRESHOLD_ARGS=(--decision-threshold "$DECISION_THRESHOLD")
+GAZE_ARGS=()
+[[ "$REQUIRE_VALID_GAZE_HISTORY" != "1" ]] || GAZE_ARGS=(--require-valid-gaze-history)
 "$PYTHON" -m fovsim predict-linear-policy \
   --trace "$TRACE" --visibility "$VISIBILITY" --model "$MODEL" \
   --output-dir "$POLICY_DIR" --history-ms 500 --horizon-ms 500 \
   --policy-mode "$POLICY_MODE" --guard-band-steps "$GUARD_BAND_STEPS" \
   --model-root "$MODEL_ROOT" --gt-root "$GT_SEQUENCE_ROOT" \
-  "${THRESHOLD_ARGS[@]}"
+  "${THRESHOLD_ARGS[@]}" "${GAZE_ARGS[@]}"
 "$PYTHON" "$REPO/scripts/evaluate_standard_ply_qoe.py" \
   --trace "$TRACE" --decisions "$POLICY_DIR/cell_decisions.csv" \
   --model-root "$MODEL_ROOT" --gt-root "$GT_SEQUENCE_ROOT" \

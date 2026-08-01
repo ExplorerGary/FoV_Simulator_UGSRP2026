@@ -26,10 +26,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--gt-root", type=Path, required=True)
+    parser.add_argument("--variants", nargs="+", default=VARIANTS)
+    parser.add_argument(
+        "--experiment",
+        default="500ms motion-aware quadratic Ridge LR BNQ sweep",
+    )
     args = parser.parse_args()
     rows = []
     details: dict[str, object] = {}
-    for variant in VARIANTS:
+    for variant in args.variants:
         frame_count = policy_bytes = full_bytes = raw_gt_bytes = 0
         selected_weighted = full_mse_weighted = ssim_weighted = lpips_weighted = 0.0
         e3_mse_weighted = 0.0
@@ -85,7 +90,7 @@ def main() -> None:
         details[variant] = trace_details
     output = {
         "status": "PASS",
-        "experiment": "500ms motion-aware quadratic Ridge LR BNQ sweep",
+        "experiment": args.experiment,
         "aggregate": rows,
         "per_trace": details,
     }

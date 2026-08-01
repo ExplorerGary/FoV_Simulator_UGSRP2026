@@ -106,6 +106,17 @@ and CPU aggregation. Results use the new root
 `/scratch/$USER/fov_lr500_bnq_v2`; the final rate/quality table is
 `bnq_summary.csv`, with complete per-trace records in `bnq_summary.json`.
 
+The gaze iteration keeps the V1 raw head history and adds historical unit gaze
+direction features to the same multi-output Ridge model. It evaluates V1 and
+gaze LR on the identical gaze-valid time range:
+
+```bash
+bash scripts/submit_lr500_gaze_bnq_batch.sh
+```
+
+This submits gaze training, a 24-task matched V1/gaze BNQ array, and a summary
+job under `/scratch/$USER/fov_lr500_gaze_bnq_v1`.
+
 Install the prediction dependency and evaluate an existing visibility set:
 
 ```bash
