@@ -233,8 +233,38 @@ End-to-end BNQ：
 - bandwidth saving vs Full E3：45.93%；
 - data reduction vs DanceNet3D GT PLY：79.73%。
 
-V2 的结果尚未产生，必须由完整 BNQ batch 得到；不能只凭 cell F2 宣称 V2
-改善了最终 QoE。
+### V2 motion-aware LR 结果
+
+V2 在训练集内部校准得到 threshold `0.18`。两条 test trace 合并的 cell
+prediction 为：
+
+- recall：0.6767；precision：0.3077；
+- F1：0.4230；F2：0.5458；
+- predicted cells/frame：66.55；
+- missed cells/frame：9.78；extra cells/frame：46.08。
+
+与 V1 threshold 0.20 相比，V2 recall 提高约 7.25 个百分点、每帧少漏约
+2.19 个 cell，但每帧多产生约 15.70 个 extra cell；F2 只从 0.5386 增至
+0.5458。因此 V2 更积极，但 cell-level rate efficiency 没有明显改善。
+
+完整 BNQ operating points：
+
+| Variant | Mbps | Saving vs Full E3 | PSNR vs GT | ΔPSNR vs Full E3 |
+|---|---:|---:|---:|---:|
+| Base-only | 269.64 | 79.66% | 25.77 dB | -3.52 dB |
+| Persistence | 529.04 | 60.09% | 26.62 dB | -2.66 dB |
+| V1 t=0.20 | 716.71 | 45.93% | 27.33 dB | -1.96 dB |
+| V2 t=0.10 | 999.14 | 24.62% | 28.19 dB | -1.10 dB |
+| V2 t=0.15 | 894.59 | 32.51% | 27.63 dB | -1.66 dB |
+| V2 t=0.20 | 802.62 | 39.45% | 27.19 dB | -2.10 dB |
+| V2 t=0.25 | 726.66 | 45.18% | 26.90 dB | -2.39 dB |
+| V2 t=0.20 + guard6 | 1076.48 | 18.79% | 28.78 dB | -0.51 dB |
+
+V2 t=0.20 和 t=0.25 均被 V1 t=0.20 支配：它们使用更多带宽但 PSNR 更低。
+因此不能宣称 motion-aware feature 本身全面优于 V1。当前观测到的 Pareto
+序列是 Base-only、Persistence、V1 t=0.20、V2 t=0.15、V2 t=0.10、V2
+guard6、Full E3。Guard6 是最接近 Full E3 的 streaming 点，但其改善主要
+来自空间 safety margin，不能归因于 LR feature 本身。
 
 ## 9. 已知限制
 
@@ -244,6 +274,8 @@ V2 的结果尚未产生，必须由完整 BNQ batch 得到；不能只凭 cell 
 - 所有 cell 的回归损失没有直接按 Gaussian bytes 或画面贡献加权。
 - Threshold calibration 优化 F2，不等同于直接优化 PSNR/bitrate。
 - Guard band 是固定六邻域，没有根据速度或 cell 传输成本自适应。
+- Trace 已含高覆盖率 gaze unit direction，但尚未作为 LR feature；其收益
+  必须在相同 bitrate 下与 head-only LR 比较，而不能只看 recall。
 - DanceNet3D GT 是参考 PLY，不是可直接比较的网络 codec。
 
 ## 10. LR 变更强制检查清单
@@ -271,4 +303,5 @@ V2 的结果尚未产生，必须由完整 BNQ batch 得到；不能只凭 cell 
 | 2026-07-31 | `c4b1ec7` | 固定 500 ms binary-target Ridge iteration 与自动评估。 |
 | 2026-07-31 | `fefee92` | 将 LR decisions 接入 bandwidth 与 QoE renderer。 |
 | 2026-08-01 | `df9bb8c` | 加入 147 维 motion-aware quadratic LR、threshold sweep、Base/Persistence 和完整 BNQ batch。 |
-| 2026-08-01 | this commit | 建立本文档，作为后续 LR 变更的强制追溯记录。 |
+| 2026-08-01 | `abceb80` | 建立本文档，作为后续 LR 变更的强制追溯记录。 |
+| 2026-08-01 | this commit | 记录 V2 cell prediction、完整 BNQ curve、Pareto 与 dominated operating points。 |
