@@ -24,3 +24,6 @@ slurm-*.out
 .vscode/
 .DS_Store
 Thumbs.db
+
+# LR design history is documentation, never an ignored experiment artifact.
+!explanation_lr.md

@@ -28,6 +28,10 @@ The original GSV renderer remains useful for local cross-validation.
 
 ## Linear FoV prediction
 
+The maintained implementation contract, feature formulas, experiment history,
+and mandatory update checklist live in [`explanation_lr.md`](explanation_lr.md).
+Every LR-related change must update that file in the same commit.
+
 The `predict-linear` command implements the prediction mechanism used by the
 progressive FoV streamer:
 
