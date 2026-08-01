@@ -77,6 +77,31 @@ evaluates the fixed 8:2 split, compares persistence, and writes a compact
 `lr500_evaluation.json` beside the model and per-trace CSV under
 `/scratch/$USER/fov_visibility_lr/linear_prediction_lr500_binary`.
 
+### Motion-aware 500 ms LR BNQ sweep
+
+The second LR iteration keeps Ridge regression as the only learned model but
+uses fixed motion-aware features: pose relative to the current sample,
+long/short velocity, acceleration, a constant-acceleration 500 ms pose
+projection, and quadratic interactions of that projected pose. The test
+traces remain isolated and none of these features reads current or future
+visibility.
+
+The complete bandwidth-and-QoE batch trains that model and evaluates two test
+traces at eight operating points: Base-only, causal visibility persistence,
+the original raw-history LR, four motion-aware LR thresholds, and one
+motion-aware LR point with a six-connected one-cell spatial guard band. Full
+E3 and DanceNet3D GT are rendered by the evaluator for every point.
+
+```bash
+cd ~/FoV_Simulator_UGSRP2026
+bash scripts/submit_lr500_bnq_batch.sh
+```
+
+The three dependent Slurm stages are CPU training, a 16-task H100 QoE array,
+and CPU aggregation. Results use the new root
+`/scratch/$USER/fov_lr500_bnq_v2`; the final rate/quality table is
+`bnq_summary.csv`, with complete per-trace records in `bnq_summary.json`.
+
 Install the prediction dependency and evaluate an existing visibility set:
 
 ```bash

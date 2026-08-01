@@ -87,6 +87,11 @@ def _parser() -> argparse.ArgumentParser:
     predict.add_argument("--seed", type=int, default=20260731)
     predict.add_argument("--ridge-alpha", type=float, default=1.0)
     predict.add_argument("--expected-traces", type=int)
+    predict.add_argument(
+        "--feature-mode",
+        choices=("raw_history", "motion_quadratic"),
+        default="raw_history",
+    )
     policy = subparsers.add_parser(
         "predict-linear-policy",
         help="Convert a saved DoF-only linear model into QoE cell decisions.",
@@ -102,6 +107,13 @@ def _parser() -> argparse.ArgumentParser:
     policy.add_argument("--model-root", type=Path)
     policy.add_argument("--gt-root", type=Path)
     policy.add_argument("--asset-frame-offset", type=int, default=1)
+    policy.add_argument(
+        "--policy-mode",
+        choices=("linear", "persistence", "base_only"),
+        default="linear",
+    )
+    policy.add_argument("--decision-threshold", type=float)
+    policy.add_argument("--guard-band-steps", type=int, default=0)
     return parser
 
 
@@ -165,6 +177,7 @@ def main() -> None:
             seed=args.seed,
             ridge_alpha=args.ridge_alpha,
             expected_traces=args.expected_traces,
+            feature_mode=args.feature_mode,
         )
         print(json.dumps(result, indent=2, sort_keys=True))
     elif args.command == "predict-linear-policy":
@@ -176,6 +189,9 @@ def main() -> None:
             sequence=args.sequence, fps=args.fps, history_ms=args.history_ms,
             horizon_ms=args.horizon_ms, model_root=args.model_root,
             gt_root=args.gt_root, asset_frame_offset=args.asset_frame_offset,
+            policy_mode=args.policy_mode,
+            decision_threshold=args.decision_threshold,
+            guard_band_steps=args.guard_band_steps,
         )
         print(json.dumps(result, indent=2, sort_keys=True))
     else:

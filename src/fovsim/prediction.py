@@ -118,6 +118,7 @@ class StandardizedRidge:
         decision_threshold: float,
         target_threshold: float,
         training_target_mode: str,
+        feature_mode: str = "raw_history",
     ) -> None:
         import numpy as np
 
@@ -138,6 +139,7 @@ class StandardizedRidge:
             decision_threshold=np.asarray([decision_threshold], dtype=np.float64),
             target_threshold=np.asarray([target_threshold], dtype=np.float64),
             training_target_mode=np.asarray([training_target_mode]),
+            feature_mode=np.asarray([feature_mode]),
         )
 
 
@@ -298,6 +300,7 @@ def _examples(
     fps: float,
     history_steps: int,
     horizon_s: float,
+    feature_mode: str = "raw_history",
 ) -> Examples:
     import numpy as np
 
@@ -335,13 +338,81 @@ def _examples(
         raise ValueError(f"No aligned visibility examples remain for {trace.name}")
     current = np.asarray(current_indices, dtype=np.int64)
     target = np.asarray(target_indices, dtype=np.int64)
+    history_array = np.stack(histories)
     return Examples(
-        features=np.stack(histories).reshape(len(current), -1),
+        features=_history_features(
+            history_array,
+            fps=fps,
+            horizon_s=horizon_s,
+            feature_mode=feature_mode,
+        ),
         targets=visibility_values[target],
         current_visibility=visibility_values[current],
         actual_horizons_s=visibility.times_s[target] - visibility.times_s[current],
         current_indices=current,
         target_indices=target,
+    )
+
+
+def _history_features(
+    histories: "np.ndarray",
+    *,
+    fps: float,
+    horizon_s: float,
+    feature_mode: str,
+) -> "np.ndarray":
+    """Build fixed features while keeping Ridge as the only learned model."""
+    import numpy as np
+
+    if feature_mode == "raw_history":
+        return histories.reshape(len(histories), -1)
+    if feature_mode != "motion_quadratic":
+        raise ValueError(
+            "feature_mode must be 'raw_history' or 'motion_quadratic'"
+        )
+    if histories.shape[1] < 2:
+        raise ValueError("motion_quadratic requires at least two history samples")
+
+    current = histories[:, -1, :]
+    relative_history = histories[:, :-1, :] - current[:, None, :]
+    history_duration = (histories.shape[1] - 1) / fps
+    long_velocity = (current - histories[:, 0, :]) / history_duration
+    short_steps = min(3, histories.shape[1] - 1)
+    short_duration = short_steps / fps
+    short_velocity = (
+        current - histories[:, -1 - short_steps, :]
+    ) / short_duration
+    if histories.shape[1] >= 2 * short_steps + 1:
+        earlier_velocity = (
+            histories[:, -1 - short_steps, :]
+            - histories[:, -1 - 2 * short_steps, :]
+        ) / short_duration
+        acceleration = (short_velocity - earlier_velocity) / short_duration
+    else:
+        acceleration = np.zeros_like(short_velocity)
+    extrapolated = (
+        current
+        + short_velocity * horizon_s
+        + 0.5 * acceleration * horizon_s * horizon_s
+    )
+    quadratic_columns = [
+        extrapolated[:, left] * extrapolated[:, right]
+        for left in range(6)
+        for right in range(left, 6)
+    ]
+    quadratic = np.column_stack(quadratic_columns)
+    return np.concatenate(
+        [
+            current,
+            relative_history.reshape(len(histories), -1),
+            long_velocity,
+            short_velocity,
+            acceleration,
+            extrapolated,
+            quadratic,
+            current * short_velocity,
+        ],
+        axis=1,
     )
 
 
@@ -510,6 +581,7 @@ def run_linear_prediction(
     seed: int = 20260731,
     ridge_alpha: float = 1.0,
     expected_traces: int | None = None,
+    feature_mode: str = "raw_history",
 ) -> dict[str, object]:
     """Fit direct DoF-history-to-cell-visibility regressors."""
     import numpy as np
@@ -522,6 +594,8 @@ def run_linear_prediction(
         raise ValueError("decision_threshold_steps must be at least 2")
     if target_mode not in {"fraction", "binary"}:
         raise ValueError("target_mode must be 'fraction' or 'binary'")
+    if feature_mode not in {"raw_history", "motion_quadratic"}:
+        raise ValueError("Invalid feature_mode")
     traces = discover_traces(trace_dir, sequence=sequence, fps=fps)
     if expected_traces is not None and len(traces) != expected_traces:
         raise ValueError(
@@ -575,6 +649,7 @@ def run_linear_prediction(
                 fps=fps,
                 history_steps=history_steps,
                 horizon_s=horizon_ms / 1000.0,
+                feature_mode=feature_mode,
             )
             for trace in traces
         }
@@ -621,6 +696,7 @@ def run_linear_prediction(
             decision_threshold=decision_threshold,
             target_threshold=visibility_threshold,
             training_target_mode=target_mode,
+            feature_mode=feature_mode,
         )
 
         test_x = _concat(testing, "features")
@@ -736,6 +812,7 @@ def run_linear_prediction(
             "horizons_ms": list(horizon_steps),
             "visibility_threshold": visibility_threshold,
             "training_target_mode": target_mode,
+            "feature_mode": feature_mode,
             "decision_threshold_search": {
                 "minimum": decision_threshold_min,
                 "maximum": decision_threshold_max,

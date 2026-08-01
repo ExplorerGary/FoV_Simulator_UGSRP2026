@@ -95,6 +95,7 @@ class LinearPredictionTests(unittest.TestCase):
                 history_ms=500,
                 horizons_ms=(100, 200),
                 target_mode="binary",
+                feature_mode="motion_quadratic",
                 seed=7,
                 expected_traces=5,
             )
@@ -104,6 +105,7 @@ class LinearPredictionTests(unittest.TestCase):
             self.assertEqual(len(summary["split"]["test_traces"]), 1)
             self.assertEqual(summary["cell_count"], 2)
             self.assertEqual(summary["config"]["training_target_mode"], "binary")
+            self.assertEqual(summary["config"]["feature_mode"], "motion_quadratic")
             selected_threshold = summary["horizons"]["200ms"][
                 "threshold_calibration"
             ]["selected_decision_threshold"]
@@ -186,6 +188,67 @@ class LinearPredictionTests(unittest.TestCase):
             rows = list(csv.DictReader(outputs[0].splitlines()))
             self.assertEqual({row["target_level"] for row in rows}, {"0", "3"})
             self.assertEqual([int(row["output_frame"]) for row in rows[:2]], [0, 0])
+
+    def test_motion_quadratic_model_and_policy_guard_band(self) -> None:
+        import numpy as np
+        from fovsim.predicted_policy import generate_predicted_policy
+        from fovsim.prediction import StandardizedRidge, _history_features
+
+        histories = np.arange(4 * 6 * 6, dtype=float).reshape(4, 6, 6)
+        features = _history_features(
+            histories, fps=10.0, horizon_s=0.5,
+            feature_mode="motion_quadratic",
+        )
+        self.assertEqual(features.shape, (4, 87))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            trace = root / "trace.csv"
+            visibility = root / "visibility.csv"
+            self._write_trace(trace, 0)
+            with visibility.open("w", encoding="utf-8", newline="") as stream:
+                writer = csv.writer(stream)
+                writer.writerow([
+                    "output_frame", "output_time_s", "trace_source_row",
+                    "trace_timestamp_s", "gsv_frame", "cell_id",
+                    "contributing_gaussian_fraction",
+                ])
+                for frame in range(31):
+                    writer.writerow([frame, frame / 10, frame + 2, frame / 10,
+                                     frame, "0:0:0", 1.0])
+                    writer.writerow([frame, frame / 10, frame + 2, frame / 10,
+                                     frame, "1:0:0", 0.0])
+            model = StandardizedRidge(
+                feature_mean=np.zeros(87), feature_scale=np.ones(87),
+                target_mean=np.asarray([0.8, 0.1]), target_scale=np.ones(2),
+                coefficients=np.zeros((87, 2)), alpha=1.0,
+            )
+            model_path = root / "model.npz"
+            model.save(
+                model_path, cell_ids=("0:0:0", "1:0:0"),
+                decision_threshold=0.5, target_threshold=0.5,
+                training_target_mode="binary", feature_mode="motion_quadratic",
+            )
+            guarded = root / "guarded"
+            result = generate_predicted_policy(
+                trace_path=trace, visibility_path=visibility,
+                model_path=model_path, output_dir=guarded, fps=10,
+                history_ms=500, horizon_ms=500, guard_band_steps=1,
+            )
+            self.assertEqual(result["feature_mode"], "motion_quadratic")
+            self.assertEqual(result["mean_selected_cells"], 2.0)
+            base = generate_predicted_policy(
+                trace_path=trace, visibility_path=visibility,
+                model_path=model_path, output_dir=root / "base", fps=10,
+                history_ms=500, horizon_ms=500, policy_mode="base_only",
+            )
+            self.assertEqual(base["mean_selected_cells"], 0.0)
+            persistence = generate_predicted_policy(
+                trace_path=trace, visibility_path=visibility,
+                model_path=model_path, output_dir=root / "persistence", fps=10,
+                history_ms=500, horizon_ms=500, policy_mode="persistence",
+            )
+            self.assertEqual(persistence["mean_selected_cells"], 1.0)
 
 
 if __name__ == "__main__":

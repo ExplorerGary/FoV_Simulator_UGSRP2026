@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -82,12 +81,21 @@ def generate_predicted_policy(
     fps: float = 30.0, history_ms: int = 500, horizon_ms: int = 500,
     model_root: Path | None = None, gt_root: Path | None = None,
     asset_frame_offset: int = 1,
+    policy_mode: str = "linear",
+    decision_threshold: float | None = None,
+    guard_band_steps: int = 0,
 ) -> dict[str, object]:
     """Write QoE decisions without consulting future visibility fractions."""
     import numpy as np
 
     if (model_root is None) != (gt_root is None):
         raise ValueError("model_root and gt_root must be supplied together")
+    if policy_mode not in {"linear", "persistence", "base_only"}:
+        raise ValueError("Invalid policy_mode")
+    if decision_threshold is not None and not 0.0 <= decision_threshold <= 1.0:
+        raise ValueError("decision_threshold must be within [0, 1]")
+    if guard_band_steps < 0:
+        raise ValueError("guard_band_steps must be non-negative")
     trace = _load_sampled_trace(trace_path, sequence, fps)
     if trace is None:
         raise ValueError(f"Trace does not contain FileName={sequence!r}")
@@ -98,16 +106,6 @@ def generate_predicted_policy(
     provenance = _load_provenance(visibility_path)
     if len(provenance) != len(visibility.times_s):
         raise ValueError("Visibility/provenance frame count mismatch")
-    history_steps = max(1, int(round(history_ms * fps / 1000.0)))
-    alignment_only = VisibilityFrames(
-        output_frames=visibility.output_frames,
-        times_s=visibility.times_s,
-        values_by_frame=[{} for _ in visibility.values_by_frame],
-    )
-    examples = _examples(
-        trace, alignment_only, {}, fps=fps, history_steps=history_steps,
-        horizon_s=horizon_ms / 1000.0,
-    )
     with np.load(model_path, allow_pickle=False) as saved:
         model = StandardizedRidge(
             feature_mean=saved["feature_mean"], feature_scale=saved["feature_scale"],
@@ -115,10 +113,60 @@ def generate_predicted_policy(
             coefficients=saved["coefficients"], alpha=float(saved["alpha"][0]),
         )
         cell_ids = [str(value) for value in saved["cell_ids"]]
-        threshold = float(saved["decision_threshold"][0])
-    scores = np.clip(model.predict(examples.features), 0.0, 1.0)
+        saved_threshold = float(saved["decision_threshold"][0])
+        target_threshold = float(saved["target_threshold"][0])
+        feature_mode = (
+            str(saved["feature_mode"][0])
+            if "feature_mode" in saved.files
+            else "raw_history"
+        )
+    threshold = saved_threshold if decision_threshold is None else decision_threshold
+    history_steps = max(1, int(round(history_ms * fps / 1000.0)))
+    cell_index = {cell_id: index for index, cell_id in enumerate(cell_ids)}
+    if policy_mode == "persistence":
+        example_visibility = visibility
+        example_cells = cell_index
+    else:
+        example_visibility = VisibilityFrames(
+            output_frames=visibility.output_frames,
+            times_s=visibility.times_s,
+            values_by_frame=[{} for _ in visibility.values_by_frame],
+        )
+        example_cells = {}
+    examples = _examples(
+        trace, example_visibility, example_cells, fps=fps,
+        history_steps=history_steps, horizon_s=horizon_ms / 1000.0,
+        feature_mode=feature_mode,
+    )
+    if policy_mode == "linear":
+        scores = np.clip(model.predict(examples.features), 0.0, 1.0)
+    elif policy_mode == "persistence":
+        scores = examples.current_visibility
+        threshold = target_threshold
+    else:
+        scores = np.zeros((len(examples.features), len(cell_ids)))
+        threshold = 1.0
     if scores.shape[1] != len(cell_ids):
         raise ValueError("Model output dimension does not match its cell IDs")
+    selected_matrix = scores >= threshold
+    if guard_band_steps:
+        coordinates = [_parse_cell_id(cell_id) for cell_id in cell_ids]
+        index_by_coordinate = {
+            coordinate: index for index, coordinate in enumerate(coordinates)
+        }
+        for _ in range(guard_band_steps):
+            expanded = selected_matrix.copy()
+            for cell_index_value, (x, y, z) in enumerate(coordinates):
+                neighbors = (
+                    (x - 1, y, z), (x + 1, y, z),
+                    (x, y - 1, z), (x, y + 1, z),
+                    (x, y, z - 1), (x, y, z + 1),
+                )
+                for neighbor in neighbors:
+                    neighbor_index = index_by_coordinate.get(neighbor)
+                    if neighbor_index is not None:
+                        expanded[:, neighbor_index] |= selected_matrix[:, cell_index_value]
+            selected_matrix = expanded
 
     # Timestamp gaps can map more than one history to one future frame. Keep the
     # candidate closest to the requested horizon, yielding one policy per frame.
@@ -135,7 +183,7 @@ def generate_predicted_policy(
 
     rows: list[dict[str, object]] = []
     skipped_assets = 0
-    for emitted_frame, (target_index, example_index) in enumerate(sorted(selected.items())):
+    for target_index, example_index in sorted(selected.items()):
         target = provenance[target_index]
         asset_id = target.gsv_frame + asset_frame_offset
         if model_root is not None and not all(
@@ -149,6 +197,7 @@ def generate_predicted_policy(
         for cell_index, cell_id in enumerate(cell_ids):
             x, y, z = _parse_cell_id(cell_id)
             score = float(scores[example_index, cell_index])
+            enhancement_required = bool(selected_matrix[example_index, cell_index])
             rows.append({
                 "output_frame": output_frame,
                 "source_output_frame": target.output_frame,
@@ -160,8 +209,8 @@ def generate_predicted_policy(
                 "cell_id": cell_id, "cell_x": x, "cell_y": y, "cell_z": z,
                 "predicted_visibility_score": score,
                 "decision_threshold": threshold,
-                "enhancement_required": int(score >= threshold),
-                "target_level": 3 if score >= threshold else 0,
+                "enhancement_required": int(enhancement_required),
+                "target_level": 3 if enhancement_required else 0,
                 "prediction_current_output_frame": current.output_frame,
                 "prediction_current_trace_timestamp_s": current.trace_timestamp_s,
                 "requested_horizon_ms": horizon_ms,
@@ -173,10 +222,20 @@ def generate_predicted_policy(
     write_csv_atomic(output_dir / "cell_decisions.csv", list(rows[0]), rows)
     frame_count = len(rows) // len(cell_ids)
     summary = {
-        "status": "PASS", "input_contract": "6dof_history_only",
+        "status": "PASS",
+        "policy_mode": policy_mode,
+        "feature_mode": feature_mode,
+        "input_contract": (
+            "6dof_history_only" if policy_mode == "linear"
+            else "current_visibility" if policy_mode == "persistence"
+            else "none"
+        ),
         "future_visibility_values_used": False,
         "trace": trace.name, "history_ms": history_ms, "horizon_ms": horizon_ms,
-        "decision_threshold": threshold, "cell_count": len(cell_ids),
+        "decision_threshold": threshold,
+        "saved_decision_threshold": saved_threshold,
+        "guard_band_steps": guard_band_steps,
+        "cell_count": len(cell_ids),
         "frame_count": frame_count, "skipped_missing_asset_frames": skipped_assets,
         "mean_selected_cells": sum(int(row["enhancement_required"]) for row in rows) / frame_count,
         "output": str((output_dir / "cell_decisions.csv").resolve()),
