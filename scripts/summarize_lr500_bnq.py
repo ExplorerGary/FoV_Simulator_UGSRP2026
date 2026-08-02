@@ -41,6 +41,8 @@ def policy_cell_metrics(decisions: Path, visibility: Path) -> dict[str, float | 
             fractions[key] = float(row["contributing_gaussian_fraction"])
     tp = fp = fn = tn = samples = 0
     squared_error = 0.0
+    target_sum = 0.0
+    target_squared_sum = 0.0
     with decisions.open("r", encoding="utf-8-sig", newline="") as stream:
         for row in csv.DictReader(stream):
             key = (int(row["source_output_frame"]), row["cell_id"].strip())
@@ -54,6 +56,8 @@ def policy_cell_metrics(decisions: Path, visibility: Path) -> dict[str, float | 
             predicted = row["target_level"].strip().lower() in {"3", "e3"}
             score = float(row["predicted_visibility_score"])
             squared_error += (score - fraction) ** 2
+            target_sum += fraction
+            target_squared_sum += fraction**2
             samples += 1
             if predicted and expected:
                 tp += 1
@@ -73,6 +77,8 @@ def policy_cell_metrics(decisions: Path, visibility: Path) -> dict[str, float | 
     return {
         "samples": samples,
         "squared_error": squared_error,
+        "target_sum": target_sum,
+        "target_squared_sum": target_squared_sum,
         "true_positive": tp,
         "false_positive": fp,
         "false_negative": fn,
@@ -102,6 +108,7 @@ def main() -> None:
         policy_points = full_points = gt_points = 0
         cell_samples = cell_tp = cell_fp = cell_fn = cell_tn = 0
         cell_squared_error = 0.0
+        cell_target_sum = cell_target_squared_sum = 0.0
         selected_weighted = full_mse_weighted = ssim_weighted = lpips_weighted = 0.0
         e3_mse_weighted = 0.0
         fore_pixels = 0
@@ -143,6 +150,8 @@ def main() -> None:
                 )
                 cell_samples += int(cell["samples"])
                 cell_squared_error += float(cell["squared_error"])
+                cell_target_sum += float(cell["target_sum"])
+                cell_target_squared_sum += float(cell["target_squared_sum"])
                 cell_tp += int(cell["true_positive"])
                 cell_fp += int(cell["false_positive"])
                 cell_fn += int(cell["false_negative"])
@@ -172,6 +181,10 @@ def main() -> None:
             5 * cell_precision * cell_recall / (4 * cell_precision + cell_recall)
             if 4 * cell_precision + cell_recall else 0.0
         )
+        cell_target_sst = (
+            cell_target_squared_sum - cell_target_sum**2 / cell_samples
+            if cell_samples else 0.0
+        )
         row = {
             "variant": variant,
             "frames": frame_count,
@@ -190,6 +203,10 @@ def main() -> None:
             "point_savings_vs_dancenet3d_gt": 1.0 - policy_points / gt_points,
             "cell_mse": (
                 cell_squared_error / cell_samples if cell_samples else None
+            ),
+            "cell_r2": (
+                1.0 - cell_squared_error / cell_target_sst
+                if cell_target_sst > 1.0e-12 else None
             ),
             "cell_precision": cell_precision if cell_samples else None,
             "cell_recall": cell_recall if cell_samples else None,

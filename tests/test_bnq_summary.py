@@ -78,6 +78,8 @@ class BnqSummaryTests(unittest.TestCase):
             self.assertEqual(metrics["false_positive"], 0)
             self.assertEqual(metrics["false_negative"], 0)
             self.assertEqual(metrics["squared_error"], 0.0)
+            self.assertAlmostEqual(metrics["target_sum"], 1.7)
+            self.assertAlmostEqual(metrics["target_squared_sum"], 1.45)
             self.assertEqual(metrics["precision"], 1.0)
             self.assertEqual(metrics["recall"], 1.0)
 

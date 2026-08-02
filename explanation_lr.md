@@ -623,3 +623,4 @@ current-visibility LR 超过 Persistence。
 | 2026-08-02 | pending | visibility-score BNQ 新增 `REUSE_POLICY=1` 恢复模式：仅复用非空的 22 份 policy CSV，从 QoE 阶段续跑。 |
 | 2026-08-02 | pending | 固定 oracle sweep 的 `contributing_gaussian_fraction >= 0.20`，新增完整 500 ms DoF OLS→100 ms predicted pose→GT geometry visibility→C20 Base/E3→BNQ batch；预测与真实姿态 trace 共用严格对齐的未来帧时间轴。 |
 | 2026-08-02 | pending | 修复 BNQ cell metrics 在缺失 PLY 跳帧后的标签错位：GT visibility 与 decisions 统一按 `source_output_frame + cell_id` 对齐，缺失标签改为显式失败；PSNR/带宽未受旧 bug 影响，MSE/P/R/F-score 需 CPU-only 重汇总。 |
+| 2026-08-02 | pending | BNQ summary 新增连续 cell visibility score 的 `cell_r2 = 1 - SSE/SST`，与 MSE、C20-vs-0.5 的 Precision/Recall/F1/F2 一并汇报。 |
