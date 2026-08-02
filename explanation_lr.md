@@ -331,7 +331,8 @@ prediction 两类误差。
 首次 HPC 提交的 22 个 policy CSV 均成功生成，但 QoE evaluator 因 wrapper 未把
 `$REPO/src` 加入容器内 `PYTHONPATH`，统一报错 `ModuleNotFoundError: fovsim`。后续
 提交已在调用 evaluator 前显式 export repo source path；该失败没有产生 QoE 结果，
-不属于实验数值。
+不属于实验数值。恢复提交可设置 `REUSE_POLICY=1`；wrapper 仅在现有
+`cell_decisions.csv` 非空时跳过 policy generation，继续完成 bandwidth/QoE。
 
 ## 5. 学习器
 
@@ -619,3 +620,4 @@ current-visibility LR 超过 Persistence。
 | 2026-08-02 | pending | 按源码语义加入 LR30/LR90 窗口内 OLS sweep，统一共同评测帧并运行 33/100/333 ms；记录论文表格口径差异与 DoF-to-cell geometry 接入设计。 |
 | 2026-08-02 | pending | 新增真实-pose visibility score-definition oracle sweep：contribution/rasterized absolute thresholds 与 image-share cumulative coverage，提交 22 个完整 BNQ operating points；正式 HPC 结果待运行。 |
 | 2026-08-02 | pending | 修复 visibility-score BNQ 容器未继承 repo `src` 的问题，显式设置 `PYTHONPATH`；首次 22 个 tasks 在 policy 后、QoE 前失败，无实验结果。 |
+| 2026-08-02 | pending | visibility-score BNQ 新增 `REUSE_POLICY=1` 恢复模式：仅复用非空的 22 份 policy CSV，从 QoE 阶段续跑。 |

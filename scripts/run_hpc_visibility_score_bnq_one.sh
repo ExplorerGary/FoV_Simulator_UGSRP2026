@@ -32,9 +32,13 @@ elif [[ "$RULE_KIND" == "coverage" ]]; then
 else
   echo "Unknown RULE_KIND: $RULE_KIND" >&2; exit 2
 fi
-"$PYTHON" "$REPO/scripts/generate_visibility_score_policy.py" \
-  --visibility "$VISIBILITY" --output-dir "$POLICY_DIR" \
-  --variant "$VARIANT" --score "$SCORE" "${RULE_ARGS[@]}"
+if [[ "${REUSE_POLICY:-0}" == "1" && -s "$POLICY_DIR/cell_decisions.csv" ]]; then
+  echo "Reusing existing policy: $POLICY_DIR/cell_decisions.csv"
+else
+  "$PYTHON" "$REPO/scripts/generate_visibility_score_policy.py" \
+    --visibility "$VISIBILITY" --output-dir "$POLICY_DIR" \
+    --variant "$VARIANT" --score "$SCORE" "${RULE_ARGS[@]}"
+fi
 "$PYTHON" "$REPO/scripts/evaluate_standard_ply_qoe.py" \
   --trace "$TRACE" --decisions "$POLICY_DIR/cell_decisions.csv" \
   --model-root "$MODEL_ROOT" --gt-root "$GT_SEQUENCE_ROOT" \
