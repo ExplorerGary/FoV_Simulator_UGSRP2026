@@ -20,6 +20,7 @@ done
 GSPLAT_LIBRARY_PATH="${GSPLAT_LIBRARY_PATH:-$(
   "$PYTHON" -c 'import pathlib, gsplat; print(pathlib.Path(gsplat.__file__).resolve().parent.parent)'
 )}"
+export PYTHONPATH="$REPO/src${PYTHONPATH:+:$PYTHONPATH}"
 POLICY_DIR="$RESULT_ROOT/01_policy"
 QUALITY_DIR="$RESULT_ROOT/02_bandwidth_qoe"
 mkdir -p "$POLICY_DIR" "$QUALITY_DIR"
@@ -42,4 +43,3 @@ fi
   --cell-size-m 0.2 --sh-degree 3 --prefetch-workers 4 \
   --metric-batch-size 4 --save-every 250 --device cuda
 echo "PASS: $RESULT_ROOT"
-

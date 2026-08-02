@@ -328,6 +328,11 @@ image-share coverage 0.95   ->  7.30 selected cells/frame
 generator 的输入替换成 predicted-pose visibility，以隔离 score-definition 与 DoF
 prediction 两类误差。
 
+首次 HPC 提交的 22 个 policy CSV 均成功生成，但 QoE evaluator 因 wrapper 未把
+`$REPO/src` 加入容器内 `PYTHONPATH`，统一报错 `ModuleNotFoundError: fovsim`。后续
+提交已在调用 evaluator 前显式 export repo source path；该失败没有产生 QoE 结果，
+不属于实验数值。
+
 ## 5. 学习器
 
 设 feature matrix 为 `X`，所有 cell target 为 `Y`：
@@ -613,3 +618,4 @@ current-visibility LR 超过 Persistence。
 | 2026-08-02 | pending | 新增并本地运行 30 FPS、500 ms history、100 ms horizon 的独立坐标 DoF-to-DoF OLS；报告 Persistence→LR 的逐维 MSE/RMSE/MAE/R² 与圆周 R²。 |
 | 2026-08-02 | pending | 按源码语义加入 LR30/LR90 窗口内 OLS sweep，统一共同评测帧并运行 33/100/333 ms；记录论文表格口径差异与 DoF-to-cell geometry 接入设计。 |
 | 2026-08-02 | pending | 新增真实-pose visibility score-definition oracle sweep：contribution/rasterized absolute thresholds 与 image-share cumulative coverage，提交 22 个完整 BNQ operating points；正式 HPC 结果待运行。 |
+| 2026-08-02 | pending | 修复 visibility-score BNQ 容器未继承 repo `src` 的问题，显式设置 `PYTHONPATH`；首次 22 个 tasks 在 policy 后、QoE 前失败，无实验结果。 |
