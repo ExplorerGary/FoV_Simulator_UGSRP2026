@@ -152,11 +152,44 @@ class StandardizedRidge:
             target_threshold=np.asarray([target_threshold], dtype=np.float64),
             training_target_mode=np.asarray([training_target_mode]),
             feature_mode=np.asarray([feature_mode]),
+            rotation_encoding=np.asarray(["per_angle_sin_cos"]),
         )
 
 
 def _matching_rows(rows: Iterable[TraceRow], sequence: str) -> list[TraceRow]:
     return [row for row in rows if row.file_name == sequence]
+
+
+def _circular_interpolate_degrees(
+    sample_times: "np.ndarray",
+    source_times: "np.ndarray",
+    source_degrees: "np.ndarray",
+) -> "np.ndarray":
+    """Interpolate angles on the unit circle, following CellSight preprocessing."""
+    import numpy as np
+
+    radians = np.deg2rad(source_degrees)
+    sine = np.interp(sample_times, source_times, np.sin(radians))
+    cosine = np.interp(sample_times, source_times, np.cos(radians))
+    norm = np.hypot(sine, cosine)
+    if np.any(norm < 1e-12):
+        raise ValueError("Circular angle interpolation produced a zero vector")
+    sine /= norm
+    cosine /= norm
+    return np.rad2deg(np.arctan2(sine, cosine))
+
+
+def _encode_circular_dof(histories: "np.ndarray") -> "np.ndarray":
+    """Encode XYZ + Roll/Pitch/Yaw as XYZ + per-angle sine/cosine pairs."""
+    import numpy as np
+
+    if histories.shape[-1] != 6:
+        raise ValueError("6DoF histories must end with XYZ, Roll, Pitch, Yaw")
+    rotations = np.deg2rad(histories[..., 3:])
+    encoded_rotation = np.stack(
+        (np.sin(rotations), np.cos(rotations)), axis=-1
+    ).reshape(*histories.shape[:-1], 6)
+    return np.concatenate((histories[..., :3], encoded_rotation), axis=-1)
 
 
 def _load_sampled_trace(path: Path, sequence: str, fps: float) -> SampledTrace | None:
@@ -178,12 +211,18 @@ def _load_sampled_trace(path: Path, sequence: str, fps: float) -> SampledTrace |
         [row.location_cm + row.rotation_rpy_degrees for row in selected],
         dtype=np.float64,
     )
-    source_dof[:, 3:] = np.rad2deg(
-        np.unwrap(np.deg2rad(source_dof[:, 3:]), axis=0)
+    sampled_position = np.column_stack(
+        [np.interp(times, timestamps, source_dof[:, column]) for column in range(3)]
     )
-    sampled = np.column_stack(
-        [np.interp(times, timestamps, source_dof[:, column]) for column in range(6)]
+    sampled_rotation = np.column_stack(
+        [
+            _circular_interpolate_degrees(
+                times, timestamps, source_dof[:, column]
+            )
+            for column in range(3, 6)
+        ]
     )
+    sampled = np.column_stack((sampled_position, sampled_rotation))
     gaze_direction = None
     gaze_confidence = None
     if selected[0].gaze_direction is not None:
@@ -324,12 +363,18 @@ def _interpolate_dof(trace: SampledTrace, times_s: "np.ndarray") -> "np.ndarray"
 
     if times_s[0] < trace.times_s[0] - 1e-6 or times_s[-1] > trace.times_s[-1] + 1e-6:
         raise ValueError(f"Visibility times fall outside trace {trace.name}")
-    return np.column_stack(
+    position = np.column_stack(
+        [np.interp(times_s, trace.times_s, trace.dof[:, column]) for column in range(3)]
+    )
+    rotation = np.column_stack(
         [
-            np.interp(times_s, trace.times_s, trace.dof[:, column])
-            for column in range(6)
+            _circular_interpolate_degrees(
+                times_s, trace.times_s, trace.dof[:, column]
+            )
+            for column in range(3, 6)
         ]
     )
+    return np.column_stack((position, rotation))
 
 
 def _interpolate_gaze(
@@ -455,8 +500,9 @@ def _history_features(
     """Build fixed features while keeping Ridge as the only learned model."""
     import numpy as np
 
+    circular_histories = _encode_circular_dof(histories)
     if feature_mode == "raw_history":
-        return histories.reshape(len(histories), -1)
+        return circular_histories.reshape(len(histories), -1)
     if feature_mode not in {"motion_quadratic", "motion_gaze", "raw_gaze"}:
         raise ValueError(
             "feature_mode must be raw_history, motion_quadratic, "
@@ -465,19 +511,19 @@ def _history_features(
     if histories.shape[1] < 2:
         raise ValueError("motion_quadratic requires at least two history samples")
 
-    current = histories[:, -1, :]
-    relative_history = histories[:, :-1, :] - current[:, None, :]
+    current = circular_histories[:, -1, :]
+    relative_history = circular_histories[:, :-1, :] - current[:, None, :]
     history_duration = (histories.shape[1] - 1) / fps
-    long_velocity = (current - histories[:, 0, :]) / history_duration
+    long_velocity = (current - circular_histories[:, 0, :]) / history_duration
     short_steps = min(3, histories.shape[1] - 1)
     short_duration = short_steps / fps
     short_velocity = (
-        current - histories[:, -1 - short_steps, :]
+        current - circular_histories[:, -1 - short_steps, :]
     ) / short_duration
     if histories.shape[1] >= 2 * short_steps + 1:
         earlier_velocity = (
-            histories[:, -1 - short_steps, :]
-            - histories[:, -1 - 2 * short_steps, :]
+            circular_histories[:, -1 - short_steps, :]
+            - circular_histories[:, -1 - 2 * short_steps, :]
         ) / short_duration
         acceleration = (short_velocity - earlier_velocity) / short_duration
     else:
@@ -489,8 +535,8 @@ def _history_features(
     )
     quadratic_columns = [
         extrapolated[:, left] * extrapolated[:, right]
-        for left in range(6)
-        for right in range(left, 6)
+        for left in range(current.shape[1])
+        for right in range(left, current.shape[1])
     ]
     quadratic = np.column_stack(quadratic_columns)
     motion_features = np.concatenate(
@@ -567,7 +613,7 @@ def _history_features(
         axis=1,
     )
     head_features = (
-        histories.reshape(len(histories), -1)
+        circular_histories.reshape(len(histories), -1)
         if feature_mode == "raw_gaze"
         else motion_features
     )

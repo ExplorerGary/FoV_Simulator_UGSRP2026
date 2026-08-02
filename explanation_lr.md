@@ -35,7 +35,9 @@ visibility 是监督标签；正式 LR 推理不读取当前或未来 visibility
 - 数据：10 条 `BiancaGolden_CircleTurns` trace。
 - 字段：位置 `LocationX/Y/Z` 和旋转 `RotationRoll/Pitch/Yaw`。
 - 重采样：30 FPS。
-- Euler 角在插值前使用 `unwrap` 消除跨越 ±180 度造成的跳变。
+- `cellsight-cp` 当前实现按 CellSight 的圆周表示处理 Euler 角：Roll、Pitch、Yaw
+  分别转成 `sin/cos`，在单位圆上插值、重新归一化，再用 `atan2` 恢复角度。
+  进入 LR 时不使用恢复后的裸角度，而使用每个角的 `sin/cos` 对。
 - History：500 ms；代码使用 15 个历史间隔并包含当前采样，因此共 16 个
   6DoF pose。
 
@@ -163,6 +165,168 @@ Head basis 使用 trace 的 pitch/yaw 构造；样本检查表明其 forward 与
 world gaze 坐标方向一致。Batch 会在相同 gaze-valid history 窗口重新训练
 V1 baseline；V1 和 V3 均使用 `alpha=1.0`、相同 binary target 和相同 trace
 split，因此主要差异是 gaze feature。
+
+### CellSight rotation preprocessing（`cellsight-cp`，待重新训练）
+
+该分支保持 6DoF 的语义不变，但改变旋转在重采样和 LR feature 中的数值表示：
+
+```text
+每个源 Euler 角 θ（degrees）
+  -> (sin θ, cos θ)
+  -> 分别沿时间插值
+  -> 将插值后的二元组重新归一化到单位圆
+  -> atan2(sin θ, cos θ) 仅供对齐、渲染和日志使用
+
+LR pose feature
+  = [x, y, z,
+     sin roll, cos roll,
+     sin pitch, cos pitch,
+     sin yaw, cos yaw]
+```
+
+因此每个 pose 的 LR 数值维度由 6 变为 9。在 30 FPS、500 ms history（包含
+当前帧，共 16 个 pose）下，`raw_history` 从 96 维变为 144 维，`raw_gaze`
+从 204 维变为 252 维，`motion_quadratic` 从 147 维变为 234 维。学习器、
+target、trace split、threshold 和 policy 均未在本次改动中改变。
+
+这一处理避免 `179° -> -179°` 被误认为约 358° 的大幅运动。模型 NPZ 新增
+`rotation_encoding=per_angle_sin_cos`；旧模型必须重新训练，policy loader 会
+明确拒绝缺少该契约的旧模型，避免把旧权重误用于新 feature schema。以上仅是
+已实现的数据处理变更，尚无新的 HPC accuracy 或 BNQ 结果。
+
+### CellSight-style DoF-to-DoF LR（2026-08-02，本地已运行）
+
+该步进实验把 target 从 cell visibility 临时切换为未来 6DoF，用来单独验证
+trajectory prediction。它不替代既有 DoF-to-cell streamer，也尚未接入 BNQ。
+
+固定实验契约：
+
+```text
+timeline       = 30 FPS
+history        = 500 ms = 15 intervals = 16 samples including current
+horizon        = 100 ms = 3 frames
+split          = the existing trace-level 8:2 split, seed 20260731
+training       = 8 complete CircleTurns traces, 11556 windows
+testing        = 2 complete CircleTurns traces, 3607 windows
+environment    = local conda gs_train (Python 3.11.15, sklearn 1.5.2)
+```
+
+严格采用论文中 LR baseline 的独立坐标设计，不加入 gaze、速度、加速度、二次项
+或 guard：`x/y/z` 各自以 16 个同坐标历史值拟合一个普通
+`LinearRegression(fit_intercept=True)`；每个 Euler 角拆为 sin/cos，六个圆周坐标
+同样各自独立拟合，最后单位化并用 `atan2` 恢复角度。因此一共训练 9 个相互独立
+的 OLS，模型不共享不同 DoF 的信息。Step 0 是未来 pose 等于当前 pose 的
+Persistence；Step 1 是该 CellSight-style LR。
+
+两条测试 trace 合并结果：
+
+| Metric | Step 0 Persistence | Step 1 DoF LR | LR change |
+|---|---:|---:|---:|
+| Position MSE (cm²) | 22.015842 | 18.232571 | -17.18% |
+| Position RMSE (cm) | 4.692104 | 4.269961 | -9.00% |
+| Position MAE (cm) | 1.521023 | 1.273248 | -16.29% |
+| Position R² | 0.998783 | 0.998992 | +0.000209 |
+| Orientation MSE (degree²) | 6.558731 | 2.798082 | -57.34% |
+| Orientation RMSE (degree) | 2.561002 | 1.672747 | -34.68% |
+| Orientation MAE (degree) | 1.470996 | 1.064244 | -27.65% |
+| Orientation circular R² | 0.997521 | 0.998939 | +0.001418 |
+
+R² 的主旋转指标在 sin/cos 圆周域计算，避免 ±180° 边界虚增方差；位置使用普通
+coefficient of determination。逐 DoF MSE/R²、逐 trace 指标、模型系数分别保存为：
+
+```text
+outputs/dof_lr_500ms_to_100ms/dof_lr_evaluation.json
+outputs/dof_lr_500ms_to_100ms/step_metrics.csv
+outputs/dof_lr_500ms_to_100ms/per_trace_metrics.csv
+outputs/dof_lr_500ms_to_100ms/dof_lr_model.npz
+```
+
+LR 在两条测试 trace 上都优于 Persistence；因此本轮没有启动“失败后”的超参数
+复制。论文的 LR 超参数只有 LR30/LR90 history window，而用户要求保持 500 ms
+输入；GraphGRU 的 learning rate、hidden dimension、epoch 等不适用于普通 OLS，
+也没有混入本实验。
+
+### CellSight LR30/LR90 source-compatible sweep（2026-08-02）
+
+进一步核对仓库后，CellSight 的 LR30/LR90 是每个预测窗口内部以时间索引拟合的
+局部 OLS，不是跨训练 trace 拟合并保存的模型。`LR30`/`LR90` 分别表示严格的
+30/90 个历史样本；每个位置与每个角度的 sin/cos 坐标独立拟合。为公平比较，
+本地 sweep 只评测两种窗口都已完整建立的共同 target frames，所以同一 horizon
+下两者样本数及 Persistence 完全一致。
+
+| Horizon | Model | Position MSE (cm²) | Position R² | Rotation MSE (degree²) | Circular R² |
+|---:|---|---:|---:|---:|---:|
+| 33 ms | LR30 | 12.082236 | 0.999301 | 20.069694 | 0.992583 |
+| 33 ms | LR90 | 72.026273 | 0.995832 | 89.722675 | 0.969255 |
+| 100 ms | Persistence | 3.968973 | 0.999770 | 6.700300 | 0.997495 |
+| 100 ms | LR30 | 20.999782 | 0.998783 | 33.640951 | 0.987711 |
+| 100 ms | LR90 | 86.761286 | 0.994972 | 106.652599 | 0.963921 |
+| 333 ms | LR30 | 70.829064 | 0.995875 | 102.960223 | 0.964655 |
+| 333 ms | LR90 | 148.620250 | 0.991345 | 169.541145 | 0.944878 |
+
+CircleTurns 上 LR30 在所有三个 horizon 都优于 LR90，与论文 Tables 2/3/5--10
+的短期排序一致。论文的数值是预测 DoF 经过相机/scene geometry 后得到的 per-cell
+viewport overlap、angular span 或 occlusion visibility R²；本表是上游 DoF R²，
+数据集也不同，因此数值不应相等。论文 8i viewport-overlap R² 在 33/333 ms
+分别为 LR30 `0.941/0.809`、LR90 `0.824/0.718`；本地 DoF circular R²
+为 `0.992583/0.964655` 与 `0.969255/0.944878`，确认了 LR30 > LR90 及 horizon
+变长时 R² 下降的共同趋势，但不能宣称完成 cell-level 数值复现。
+
+源码还显示，8i trajectory generator 对位置使用真实 horizon，却把 orientation
+调用硬编码为 `future_steps=1`；FSVVD 路径则对全部九个编码坐标使用真实 horizon。
+本地 sweep 采用论文方法定义及 FSVVD 的一致行为，对位置和旋转都使用真实 horizon，
+没有复制 8i 脚本中的不一致。
+
+### DoF-to-cell geometry integration study
+
+CellSight trajectory baseline 的 DoF-to-cell 不是第二个学习器，而是确定性几何：
+预测 pose 生成 camera matrix；固定场景内均匀采样 10,000 点，按 cell 统计投影进
+viewport 的比例；occlusion-aware 版本还对未来 point cloud 进行 FoV crop 和
+Open3D HPR，再按 cell 统计可见点比例。完整接入分析记录在
+`docs/cellsight_dof_visibility_integration.md`。
+
+该机制可以接入现有 pipeline：预测 DoF 后生成 per-cell score，再写入
+`cell_decisions.csv`，现有 bandwidth/QoE evaluator 无需改变。但 CellSight 的
+viewport-overlap/HPR fraction 与当前 renderer-based
+`contributing_gaussian_fraction` 定义不同，必须分字段、重新校准 threshold，不能
+直接冒充现有 visibility。建议先实现 CellSight overlap adapter 做论文同口径 R²，
+再让现有 Gaussian visibility generator 接受 predicted-pose override，得到可直接
+用于正式 BNQ 的 renderer-consistent score。
+
+### Visibility score-definition oracle BNQ sweep（待 HPC 结果）
+
+为回答“发送 E3 的 fraction 是否等同于 CellSight visibility”，新增一个严格标记
+为 oracle 的 score-definition sweep。它先使用真实 pose 产生的已有 visibility CSV，
+只比较 score 定义及 selection rule，不声称是 100 ms prediction：
+
+| Family | Score | Operating points |
+|---|---|---|
+| Gaussian occlusion/compositing-aware | `contributing_gaussian_fraction` | absolute threshold 0.10/0.20/0.30/0.50 |
+| Gaussian viewport/no-occlusion proxy | `rasterized_gaussian_count / active_gaussian_count` | absolute threshold 0.10/0.20/0.30/0.50 |
+| Screen contribution | `image_share` | descending cells until cumulative 0.90/0.95/0.99 |
+
+第二项只是 CellSight viewport-overlap `F` 的 Gaussian analogue，不是论文用均匀空间
+采样得到的严格 volume fraction；第一项也不是 HPR point fraction，而是更符合当前
+3DGS renderer 的 `T*alpha` contribution fraction。第三项跨 cell 总和约为 1，更适合
+累计覆盖规则，不适合与前两项共用绝对 threshold。
+
+正式 batch 共 11 variants × 2 test traces = 22 个完整 BNQ jobs，输出相同的 cell
+classification、selected cells、Gaussian point counts、bytes/Mbps、PSNR、SSIM、
+LPIPS 和 foreground metrics。由于同数值 threshold 不代表同 rate，结果分析必须同时
+绘制 raw threshold curve，并在 matched mean-selected-cells / matched Mbps 下比较。
+
+本地 30 帧 sanity check 只验证计算和 schema，不能作为正式结论：
+
+```text
+contributing threshold 0.20 -> 10.60 selected cells/frame
+rasterized threshold 0.20   -> 14.13 selected cells/frame
+image-share coverage 0.95   ->  7.30 selected cells/frame
+```
+
+提交入口为 `scripts/submit_visibility_score_bnq_batch.sh`，默认独立输出目录
+`/scratch/$USER/fov_visibility_score_bnq_v1`。完成该 oracle study 后，再把相同 policy
+generator 的输入替换成 predicted-pose visibility，以隔离 score-definition 与 DoF
+prediction 两类误差。
 
 ## 5. 学习器
 
@@ -445,3 +609,7 @@ current-visibility LR 超过 Persistence。
 | 2026-08-01 | pending | 将 `raw_gaze`、threshold 0.20、guard6 operating point 归档为 `LR-V1`；记录最终 guard-policy 分类指标和 Gaussian-count reduction。 |
 | 2026-08-01 | pending | 加入 LR-V2 100 ms candidate：保留 500 ms history，新增 recall-constrained threshold，并提交 Head/Gaze、Persistence、guard6 的完整 BNQ dependency chain；结果待 HPC。 |
 | 2026-08-01 | pending | 记录 100 ms BNQ 结果；新增 causal current-visibility + raw-gaze Ridge feature mode、泄漏测试与完整 matched BNQ batch；新结果待 HPC。 |
+| 2026-08-01 | pending | `cellsight-cp` 将 Euler 重采样和 LR 旋转输入改为 CellSight 式单位圆 `sin/cos` 表示；新增 wrap-around 测试和模型 rotation schema，尚未重新训练。 |
+| 2026-08-02 | pending | 新增并本地运行 30 FPS、500 ms history、100 ms horizon 的独立坐标 DoF-to-DoF OLS；报告 Persistence→LR 的逐维 MSE/RMSE/MAE/R² 与圆周 R²。 |
+| 2026-08-02 | pending | 按源码语义加入 LR30/LR90 窗口内 OLS sweep，统一共同评测帧并运行 33/100/333 ms；记录论文表格口径差异与 DoF-to-cell geometry 接入设计。 |
+| 2026-08-02 | pending | 新增真实-pose visibility score-definition oracle sweep：contribution/rasterized absolute thresholds 与 image-share cumulative coverage，提交 22 个完整 BNQ operating points；正式 HPC 结果待运行。 |

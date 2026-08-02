@@ -12,6 +12,31 @@ NUMPY_AVAILABLE = importlib.util.find_spec("numpy") is not None
 
 @unittest.skipUnless(NUMPY_AVAILABLE, "prediction extra requires numpy")
 class LinearPredictionTests(unittest.TestCase):
+    def test_cellsight_rotation_interpolation_crosses_wrap(self) -> None:
+        import numpy as np
+        from fovsim.prediction import _circular_interpolate_degrees
+
+        result = _circular_interpolate_degrees(
+            np.asarray([0.0, 0.5, 1.0]),
+            np.asarray([0.0, 1.0]),
+            np.asarray([179.0, -179.0]),
+        )
+        self.assertAlmostEqual(result[0], 179.0)
+        self.assertAlmostEqual(abs(result[1]), 180.0)
+        self.assertAlmostEqual(result[2], -179.0)
+
+    def test_lr_rotation_features_use_sine_cosine_pairs(self) -> None:
+        import numpy as np
+        from fovsim.prediction import _encode_circular_dof
+
+        histories = np.asarray([[[1.0, 2.0, 3.0, 90.0, 0.0, -90.0]]])
+        encoded = _encode_circular_dof(histories)
+        np.testing.assert_allclose(
+            encoded,
+            [[[1.0, 2.0, 3.0, 1.0, 0.0, 0.0, 1.0, -1.0, 0.0]]],
+            atol=1e-12,
+        )
+
     def test_recall_constrained_threshold_uses_highest_feasible_value(self) -> None:
         import numpy as np
         from fovsim.prediction import _select_recall_constrained_threshold
@@ -207,9 +232,9 @@ class LinearPredictionTests(unittest.TestCase):
                                 frame, cell_id, float(variant),
                             ])
             model = StandardizedRidge(
-                feature_mean=np.zeros(36), feature_scale=np.ones(36),
+                feature_mean=np.zeros(54), feature_scale=np.ones(54),
                 target_mean=np.asarray([0.8, 0.1]), target_scale=np.ones(2),
-                coefficients=np.zeros((36, 2)), alpha=1.0,
+                coefficients=np.zeros((54, 2)), alpha=1.0,
             )
             model_path = root / "model.npz"
             model.save(
@@ -242,7 +267,7 @@ class LinearPredictionTests(unittest.TestCase):
             histories, fps=10.0, horizon_s=0.5,
             feature_mode="motion_quadratic",
         )
-        self.assertEqual(features.shape, (4, 87))
+        self.assertEqual(features.shape, (4, 144))
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -262,9 +287,9 @@ class LinearPredictionTests(unittest.TestCase):
                     writer.writerow([frame, frame / 10, frame + 2, frame / 10,
                                      frame, "1:0:0", 0.0])
             model = StandardizedRidge(
-                feature_mean=np.zeros(87), feature_scale=np.ones(87),
+                feature_mean=np.zeros(144), feature_scale=np.ones(144),
                 target_mean=np.asarray([0.8, 0.1]), target_scale=np.ones(2),
-                coefficients=np.zeros((87, 2)), alpha=1.0,
+                coefficients=np.zeros((144, 2)), alpha=1.0,
             )
             model_path = root / "model.npz"
             model.save(
@@ -305,12 +330,12 @@ class LinearPredictionTests(unittest.TestCase):
             histories, fps=10.0, horizon_s=0.5,
             feature_mode="motion_gaze", gaze_histories=gaze,
         )
-        self.assertEqual(features.shape, (4, 135))
+        self.assertEqual(features.shape, (4, 192))
         raw_gaze_features = _history_features(
             histories, fps=10.0, horizon_s=0.5,
             feature_mode="raw_gaze", gaze_histories=gaze,
         )
-        self.assertEqual(raw_gaze_features.shape, (4, 84))
+        self.assertEqual(raw_gaze_features.shape, (4, 102))
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -330,9 +355,9 @@ class LinearPredictionTests(unittest.TestCase):
                         frame, "0:0:0", 1.0,
                     ])
             model = StandardizedRidge(
-                feature_mean=np.zeros(84), feature_scale=np.ones(84),
+                feature_mean=np.zeros(102), feature_scale=np.ones(102),
                 target_mean=np.asarray([0.8]), target_scale=np.ones(1),
-                coefficients=np.zeros((84, 1)), alpha=1.0,
+                coefficients=np.zeros((102, 1)), alpha=1.0,
             )
             model_path = root / "gaze_model.npz"
             model.save(
@@ -375,7 +400,7 @@ class LinearPredictionTests(unittest.TestCase):
                             frame, frame / 10, frame + 2, frame / 10,
                             frame, cell_id, fraction,
                         ])
-            feature_count = 84 + 2
+            feature_count = 102 + 2
             coefficients = np.zeros((feature_count, 2))
             coefficients[-2:, :] = np.eye(2)
             model = StandardizedRidge(

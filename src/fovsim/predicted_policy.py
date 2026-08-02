@@ -121,6 +121,16 @@ def generate_predicted_policy(
             if "feature_mode" in saved.files
             else "raw_history"
         )
+        rotation_encoding = (
+            str(saved["rotation_encoding"][0])
+            if "rotation_encoding" in saved.files
+            else None
+        )
+        if rotation_encoding != "per_angle_sin_cos":
+            raise ValueError(
+                "Model predates CellSight-style rotation encoding; retrain it "
+                "before policy generation"
+            )
     threshold = saved_threshold if decision_threshold is None else decision_threshold
     history_steps = max(1, int(round(history_ms * fps / 1000.0)))
     cell_index = {cell_id: index for index, cell_id in enumerate(cell_ids)}
