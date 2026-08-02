@@ -37,15 +37,19 @@ def policy_cell_metrics(decisions: Path, visibility: Path) -> dict[str, float | 
     fractions: dict[tuple[int, str], float] = {}
     with visibility.open("r", encoding="utf-8-sig", newline="") as stream:
         for row in csv.DictReader(stream):
-            fractions[(int(row["output_frame"]), row["cell_id"].strip())] = float(
-                row["contributing_gaussian_fraction"]
-            )
+            key = (int(row["source_output_frame"]), row["cell_id"].strip())
+            fractions[key] = float(row["contributing_gaussian_fraction"])
     tp = fp = fn = tn = samples = 0
     squared_error = 0.0
     with decisions.open("r", encoding="utf-8-sig", newline="") as stream:
         for row in csv.DictReader(stream):
             key = (int(row["source_output_frame"]), row["cell_id"].strip())
-            fraction = fractions.get(key, 0.0)
+            if key not in fractions:
+                raise ValueError(
+                    "Decision has no source-frame-aligned visibility label: "
+                    f"source_output_frame={key[0]}, cell_id={key[1]!r}"
+                )
+            fraction = fractions[key]
             expected = fraction >= 0.5
             predicted = row["target_level"].strip().lower() in {"3", "e3"}
             score = float(row["predicted_visibility_score"])
