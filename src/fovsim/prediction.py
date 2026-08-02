@@ -136,9 +136,13 @@ class StandardizedRidge:
             cell_ids=np.asarray(cell_ids),
             input_contract=np.asarray(
                 [
-                    "6dof_and_gaze_history"
-                    if feature_mode in {"motion_gaze", "raw_gaze"}
-                    else "6dof_history_only"
+                    (
+                        "6dof_gaze_history_and_current_visibility"
+                        if feature_mode == "raw_gaze_current_visibility"
+                        else "6dof_and_gaze_history"
+                        if feature_mode in {"motion_gaze", "raw_gaze"}
+                        else "6dof_history_only"
+                    )
                 ]
             ),
             target_contract=np.asarray(
@@ -369,7 +373,9 @@ def _examples(
     target_indices: list[int] = []
     max_target_error_s = 1.1 / fps
     needs_gaze = (
-        feature_mode in {"motion_gaze", "raw_gaze"}
+        feature_mode in {
+            "motion_gaze", "raw_gaze", "raw_gaze_current_visibility"
+        }
         or require_valid_gaze_history
     )
     if needs_gaze and trace.gaze_direction is None:
@@ -410,16 +416,26 @@ def _examples(
     current = np.asarray(current_indices, dtype=np.int64)
     target = np.asarray(target_indices, dtype=np.int64)
     history_array = np.stack(histories)
-    return Examples(
-        features=_history_features(
-            history_array,
-            fps=fps,
-            horizon_s=horizon_s,
-            feature_mode=feature_mode,
-            gaze_histories=(
-                np.stack(gaze_histories) if gaze_histories else None
-            ),
+    history_feature_mode = (
+        "raw_gaze"
+        if feature_mode == "raw_gaze_current_visibility"
+        else feature_mode
+    )
+    features = _history_features(
+        history_array,
+        fps=fps,
+        horizon_s=horizon_s,
+        feature_mode=history_feature_mode,
+        gaze_histories=(
+            np.stack(gaze_histories) if gaze_histories else None
         ),
+    )
+    if feature_mode == "raw_gaze_current_visibility":
+        features = np.concatenate(
+            [features, visibility_values[current]], axis=1
+        )
+    return Examples(
+        features=features,
         targets=visibility_values[target],
         current_visibility=visibility_values[current],
         actual_horizons_s=visibility.times_s[target] - visibility.times_s[current],
@@ -788,7 +804,8 @@ def run_linear_prediction(
     if target_mode not in {"fraction", "binary"}:
         raise ValueError("target_mode must be 'fraction' or 'binary'")
     if feature_mode not in {
-        "raw_history", "motion_quadratic", "motion_gaze", "raw_gaze"
+        "raw_history", "motion_quadratic", "motion_gaze", "raw_gaze",
+        "raw_gaze_current_visibility",
     }:
         raise ValueError("Invalid feature_mode")
     traces = discover_traces(trace_dir, sequence=sequence, fps=fps)

@@ -349,6 +349,67 @@ class LinearPredictionTests(unittest.TestCase):
             self.assertEqual(result["input_contract"], "6dof_and_gaze_history")
             self.assertEqual(result["mean_selected_cells"], 1.0)
 
+    def test_current_visibility_linear_feature_is_causal(self) -> None:
+        import numpy as np
+        from fovsim.predicted_policy import generate_predicted_policy
+        from fovsim.prediction import StandardizedRidge
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            trace = root / "trace.csv"
+            visibility = root / "visibility.csv"
+            self._write_trace(trace, 0)
+            fractions = {}
+            with visibility.open("w", encoding="utf-8", newline="") as stream:
+                writer = csv.writer(stream)
+                writer.writerow([
+                    "output_frame", "output_time_s", "trace_source_row",
+                    "trace_timestamp_s", "gsv_frame", "cell_id",
+                    "contributing_gaussian_fraction",
+                ])
+                for frame in range(31):
+                    for cell_index, cell_id in enumerate(("0:0:0", "1:0:0")):
+                        fraction = (frame + cell_index) % 2
+                        fractions[(frame, cell_id)] = float(fraction)
+                        writer.writerow([
+                            frame, frame / 10, frame + 2, frame / 10,
+                            frame, cell_id, fraction,
+                        ])
+            feature_count = 84 + 2
+            coefficients = np.zeros((feature_count, 2))
+            coefficients[-2:, :] = np.eye(2)
+            model = StandardizedRidge(
+                feature_mean=np.zeros(feature_count),
+                feature_scale=np.ones(feature_count),
+                target_mean=np.zeros(2), target_scale=np.ones(2),
+                coefficients=coefficients, alpha=1.0,
+            )
+            model_path = root / "model.npz"
+            model.save(
+                model_path, cell_ids=("0:0:0", "1:0:0"),
+                decision_threshold=0.5, target_threshold=0.5,
+                training_target_mode="binary",
+                feature_mode="raw_gaze_current_visibility",
+            )
+            result = generate_predicted_policy(
+                trace_path=trace, visibility_path=visibility,
+                model_path=model_path, output_dir=root / "policy",
+                fps=10, history_ms=500, horizon_ms=100,
+            )
+            self.assertTrue(result["current_visibility_values_used"])
+            self.assertFalse(result["future_visibility_values_used"])
+            rows = list(csv.DictReader(
+                (root / "policy" / "cell_decisions.csv").read_text(
+                    encoding="utf-8"
+                ).splitlines()
+            ))
+            for row in rows:
+                current_frame = int(row["prediction_current_output_frame"])
+                expected = fractions[(current_frame, row["cell_id"])]
+                self.assertEqual(
+                    float(row["predicted_visibility_score"]), expected
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

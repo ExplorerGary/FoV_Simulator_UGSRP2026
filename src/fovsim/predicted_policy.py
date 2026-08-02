@@ -124,7 +124,10 @@ def generate_predicted_policy(
     threshold = saved_threshold if decision_threshold is None else decision_threshold
     history_steps = max(1, int(round(history_ms * fps / 1000.0)))
     cell_index = {cell_id: index for index, cell_id in enumerate(cell_ids)}
-    if policy_mode == "persistence":
+    if policy_mode == "persistence" or (
+        policy_mode == "linear"
+        and feature_mode == "raw_gaze_current_visibility"
+    ):
         example_visibility = visibility
         example_cells = cell_index
     else:
@@ -229,12 +232,21 @@ def generate_predicted_policy(
         "feature_mode": feature_mode,
         "input_contract": (
             (
-                "6dof_and_gaze_history"
+                "6dof_gaze_history_and_current_visibility"
+                if feature_mode == "raw_gaze_current_visibility"
+                else "6dof_and_gaze_history"
                 if feature_mode in {"motion_gaze", "raw_gaze"}
                 else "6dof_history_only"
             ) if policy_mode == "linear"
             else "current_visibility" if policy_mode == "persistence"
             else "none"
+        ),
+        "current_visibility_values_used": (
+            policy_mode == "persistence"
+            or (
+                policy_mode == "linear"
+                and feature_mode == "raw_gaze_current_visibility"
+            )
         ),
         "future_visibility_values_used": False,
         "trace": trace.name, "history_ms": history_ms, "horizon_ms": horizon_ms,

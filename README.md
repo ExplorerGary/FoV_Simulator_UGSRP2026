@@ -128,6 +128,16 @@ bash scripts/submit_lr100_bnq_batch.sh
 The final automatic report is
 `/scratch/$USER/fov_lr100_bnq_v1/bnq_summary.csv`.
 
+To evaluate the causal 100 ms Ridge model that additionally consumes the
+current per-cell visibility vector, run:
+
+```bash
+bash scripts/submit_lr100_currentvis_bnq_batch.sh
+```
+
+This matched experiment writes its final report to
+`/scratch/$USER/fov_lr100_currentvis_bnq_v1/bnq_summary.csv`.
+
 Install the prediction dependency and evaluate an existing visibility set:
 
 ```bash

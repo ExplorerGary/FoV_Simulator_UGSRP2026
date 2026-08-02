@@ -6,8 +6,7 @@
 
 ## 1. 一句话定义
 
-当前已经完成正式 BNQ 的机制是 head-only；新增、待 HPC 验证的 gaze
-iteration 为：
+当前归档的 LR-V1 是已经完成正式 BNQ 的 raw-head + gaze + guard6 机制：
 
 ```text
 过去 500 ms 的 6DoF + gaze direction
@@ -144,7 +143,7 @@ engineering，以便显式表达 500 ms 运动趋势。
 二阶项使它也可以称为 polynomial Ridge regression，但所有基函数都是固定
 的，唯一学习的部分仍是线性系数，因此没有跳出 LR 范畴。
 
-### V3: `raw_gaze`（待 HPC 评测）
+### V3: `raw_gaze`
 
 为了单独测量 gaze 的增益，V3 不叠加表现不稳定的 V2 head-motion feature。
 它保留 V1 的 96 维 raw head history，并加入 108 维 gaze feature：
@@ -350,7 +349,7 @@ GT PLY 确实已被删除，其他 QoE/带宽字段仍会正常输出；相对 G
 留空，并在 `gt_size_status`/`missing_gt_asset_ids` 中明确标记，避免用不完整
 分母产生错误百分比。
 
-### LR-V2 100 ms iteration（待 HPC 结果）
+### LR-V2 100 ms iteration（已完成）
 
 本轮只把 prediction horizon 从 500 ms 缩短到 100 ms；history 仍为 500 ms（16 帧），以隔离
 预测距离变化的影响。`raw_gaze` 中的 gaze extrapolation 使用实际 `horizon_s=0.1`，因此不会
@@ -366,14 +365,40 @@ binary target、8:2 trace split 与 gaze-valid matched window 均保持不变。
 
 完整 batch 评测 Base-only、100 ms Persistence、Head/Gaze F2、Head/Gaze safe，以及 Head/Gaze
 F2 + guard6，共 8 variants × 2 test traces。最终汇总自动报告 cell MSE/precision/recall/F1/F2、
-Gaussian-count reduction、byte reduction、full-frame 和 foreground QoE。该实验尚未运行，因此
-本节不预先声明任何性能收益。
+Gaussian-count reduction、byte reduction、full-frame 和 foreground QoE。
+
+结果显示，100 ms Persistence 的 MSE/F1 为 0.02284/0.7575，并以 593.86 Mbps 达到
+27.76 dB；它在带宽和 PSNR 上都严格支配普通 Head/Gaze F2 LR。两种 safe calibration 均未在
+搜索范围内达到 0.85 recall，回退至 threshold 0.10。最高画质点是 Gaze F2 + guard6：recall
+0.8874、1045.22 Mbps、28.84 dB，相比 Full E3 节省 21.18% bytes、20.14% Gaussian points，
+PSNR 损失 0.40 dB。它比 500 ms LR-V1 多约 55.4 Mbps，只提高约 0.075 dB，因此没有取代
+LR-V1 成为主要 rate-quality operating point。
 
 ```bash
 bash scripts/submit_lr100_bnq_batch.sh
 ```
 
 默认输出目录：`/scratch/$USER/fov_lr100_bnq_v1`。
+
+### 100 ms current-visibility LR iteration（待 HPC 结果）
+
+为利用 100 ms 下最强的短期相关性，新增 feature mode
+`raw_gaze_current_visibility`：在原 204 维 raw-head + gaze feature 后追加预测时刻 `t` 的完整
+cell visibility fraction 向量。输出仍是 `t+100 ms` 的所有 cell visibility，唯一学习器仍是
+标准化多输出 Ridge LR（`alpha=1.0`）。该机制明确允许读取当前 visibility，但禁止读取未来
+visibility；因此它应与 Persistence 比较，并与不读取当前 visibility 的 LR-V1 分开描述输入条件。
+
+新 batch 在完全相同 gaze-valid window 比较 Base-only、Persistence、matched Gaze LR、
+current-visibility LR 的 F2/safe thresholds，以及双方 F2 + guard6。Threshold 搜索扩展到
+0.01--0.50，以免人为阻止 recall-constrained operating point。完整 cell、point-count、bandwidth
+与 QoE 结果写入独立目录，不覆盖上一轮：
+
+```bash
+bash scripts/submit_lr100_currentvis_bnq_batch.sh
+```
+
+默认输出目录：`/scratch/$USER/fov_lr100_currentvis_bnq_v1`。该实验尚未运行，不能预先声明
+current-visibility LR 超过 Persistence。
 
 ## 9. 已知限制
 
@@ -419,3 +444,4 @@ bash scripts/submit_lr100_bnq_batch.sh
 | 2026-08-01 | this commit | 记录 gaze matched BNQ：普通 threshold 近似持平，gaze guard 以近似 QoE 额外减少 35.41 Mbps。 |
 | 2026-08-01 | pending | 将 `raw_gaze`、threshold 0.20、guard6 operating point 归档为 `LR-V1`；记录最终 guard-policy 分类指标和 Gaussian-count reduction。 |
 | 2026-08-01 | pending | 加入 LR-V2 100 ms candidate：保留 500 ms history，新增 recall-constrained threshold，并提交 Head/Gaze、Persistence、guard6 的完整 BNQ dependency chain；结果待 HPC。 |
+| 2026-08-01 | pending | 记录 100 ms BNQ 结果；新增 causal current-visibility + raw-gaze Ridge feature mode、泄漏测试与完整 matched BNQ batch；新结果待 HPC。 |

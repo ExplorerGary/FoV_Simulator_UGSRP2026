@@ -97,7 +97,10 @@ def _parser() -> argparse.ArgumentParser:
     predict.add_argument("--expected-traces", type=int)
     predict.add_argument(
         "--feature-mode",
-        choices=("raw_history", "motion_quadratic", "motion_gaze", "raw_gaze"),
+        choices=(
+            "raw_history", "motion_quadratic", "motion_gaze", "raw_gaze",
+            "raw_gaze_current_visibility",
+        ),
         default="raw_history",
     )
     predict.add_argument("--require-valid-gaze-history", action="store_true")
