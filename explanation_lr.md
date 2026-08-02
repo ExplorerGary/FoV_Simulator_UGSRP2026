@@ -621,3 +621,4 @@ current-visibility LR 超过 Persistence。
 | 2026-08-02 | pending | 新增真实-pose visibility score-definition oracle sweep：contribution/rasterized absolute thresholds 与 image-share cumulative coverage，提交 22 个完整 BNQ operating points；正式 HPC 结果待运行。 |
 | 2026-08-02 | pending | 修复 visibility-score BNQ 容器未继承 repo `src` 的问题，显式设置 `PYTHONPATH`；首次 22 个 tasks 在 policy 后、QoE 前失败，无实验结果。 |
 | 2026-08-02 | pending | visibility-score BNQ 新增 `REUSE_POLICY=1` 恢复模式：仅复用非空的 22 份 policy CSV，从 QoE 阶段续跑。 |
+| 2026-08-02 | pending | 固定 oracle sweep 的 `contributing_gaussian_fraction >= 0.20`，新增完整 500 ms DoF OLS→100 ms predicted pose→GT geometry visibility→C20 Base/E3→BNQ batch；预测与真实姿态 trace 共用严格对齐的未来帧时间轴。 |

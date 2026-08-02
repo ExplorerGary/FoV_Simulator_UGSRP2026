@@ -23,6 +23,10 @@ def parse_args() -> argparse.Namespace:
     selection.add_argument("--threshold", type=float)
     selection.add_argument("--cumulative-coverage", type=float)
     parser.add_argument("--variant", required=True)
+    parser.add_argument(
+        "--predicted-pose-visibility", action="store_true",
+        help="Mark scores as geometry evaluated at a predicted future pose.",
+    )
     return parser.parse_args()
 
 
@@ -103,9 +107,14 @@ def main() -> None:
     summary = {
         "status": "PASS",
         "variant": args.variant,
-        "input_contract": "precomputed per-cell visibility score",
-        "future_visibility_values_used": True,
-        "oracle_score_definition_study": True,
+        "input_contract": (
+            "visibility score computed from predicted future pose"
+            if args.predicted_pose_visibility
+            else "precomputed per-cell visibility score"
+        ),
+        "future_visibility_values_used": not args.predicted_pose_visibility,
+        "predicted_pose_visibility_used": args.predicted_pose_visibility,
+        "oracle_score_definition_study": not args.predicted_pose_visibility,
         "score_definition": args.score,
         "selection_rule": output_rows[0]["selection_rule"],
         "mean_selected_cells": sum(selected_counts) / len(selected_counts),
@@ -122,4 +131,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
