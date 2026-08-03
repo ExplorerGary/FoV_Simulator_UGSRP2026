@@ -7,7 +7,7 @@
 #SBATCH --time=01:00:00
 set -euo pipefail
 REPO="${REPO:-$HOME/FoV_Simulator_UGSRP2026}"
-BNQ_ROOT="${BNQ_ROOT:-/scratch/$USER/fov_dof_lr_c20_bnq_v1}"
+BNQ_ROOT="${BNQ_ROOT:-/scratch/$USER/fov_dof_lr_e3_c20_bnq_v1}"
 IMAGE="${IMAGE:-/share/apps/images/cuda12.1.1-cudnn8.9.0-devel-ubuntu22.04.2.sif}"
 OVERLAY="${OVERLAY:-/scratch/$USER/gaussian_coding_env/gsplat-hpc.ext3}"
 mkdir -p "$BNQ_ROOT/00_dof_lr_model"

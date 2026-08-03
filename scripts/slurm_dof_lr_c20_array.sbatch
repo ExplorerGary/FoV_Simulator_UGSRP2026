@@ -15,5 +15,5 @@ apptainer exec --nv --overlay "${OVERLAY}:ro" \
   --bind "/home/$USER:/home/$USER" --bind "/scratch/$USER:/scratch/$USER" \
   "$IMAGE" /usr/bin/env REPO="$REPO" \
   TRACE="$REPO/trace_csvs/$TRACE_STEM.csv" \
-  BNQ_ROOT="${BNQ_ROOT:-/scratch/$USER/fov_dof_lr_c20_bnq_v1}" \
+  BNQ_ROOT="${BNQ_ROOT:-/scratch/$USER/fov_dof_lr_e3_c20_bnq_v1}" \
   PYTHONUNBUFFERED=1 /bin/bash "$REPO/scripts/run_hpc_dof_lr_c20_one.sh"

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Generate CellSight-style cell visibility from DanceNet3D GT PLYs.
+"""Generate renderer-consistent cell visibility from a selected PLY source.
 
-The source of the policy signal is the ground-truth scene, never Base or E3.
+The policy signal can come from either the DanceNet3D GT PLY or the trained
+E3 frontier PLY. The selected source is projected at each sampled trace pose.
 For each sampled trace pose, gsplat enumerates the front-to-back
 Gaussian/pixel intersections. A Gaussian contributes when at least one pixel
 has compositing weight ``T * alpha >= visibility_weight_threshold``.
@@ -55,13 +56,19 @@ FIELDS = (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--trace", type=Path, required=True)
-    parser.add_argument("--gt-root", type=Path, required=True)
+    parser.add_argument("--gt-root", type=Path)
+    parser.add_argument(
+        "--visibility-source",
+        choices=("gt", "e3"),
+        default="gt",
+        help="PLY frontier used to compute per-cell visibility (default: gt)",
+    )
     parser.add_argument(
         "--require-model-assets-root",
         type=Path,
         help=(
-            "Optional LUT output root. Frames missing Base or E3 are skipped; "
-            "the files are checked for existence but never read for visibility."
+            "LUT output root. Required when --visibility-source=e3. When set, "
+            "frames missing Base or E3 are skipped."
         ),
     )
     parser.add_argument("--output", type=Path, required=True)
@@ -94,7 +101,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-missing-assets",
         action="store_true",
-        help="Skip trace samples whose GT PLY is absent and renumber output frames",
+        help="Skip trace samples whose required PLY assets are absent and renumber output frames",
     )
     return parser.parse_args()
 
@@ -406,6 +413,12 @@ def main() -> None:
         raise ValueError("--cell-size-m must be positive")
     if not 0.0 <= args.visibility_weight_threshold <= 1.0:
         raise ValueError("Visibility threshold must be within [0, 1]")
+    if args.visibility_source == "gt" and args.gt_root is None:
+        raise ValueError("--gt-root is required when --visibility-source=gt")
+    if args.visibility_source == "e3" and args.require_model_assets_root is None:
+        raise ValueError(
+            "--require-model-assets-root is required when --visibility-source=e3"
+        )
 
     sys.path.insert(0, str(args.gsplat_library_path.resolve()))
     from gsplat.cuda._wrapper import rasterize_to_indices_in_range
@@ -436,10 +449,26 @@ def main() -> None:
         writer.writeheader()
         for source_output, output_time, trace in samples:
             asset_id = int(trace["gsv_frame"]) + args.asset_frame_offset
-            gt_path = args.gt_root / f"{asset_id:07d}.ply"
             frame = f"{asset_id:07d}"
-            required_paths = {"gt": gt_path}
+            gt_path = (
+                args.gt_root / f"{asset_id:07d}.ply"
+                if args.gt_root is not None
+                else None
+            )
+            required_paths: dict[str, Path] = {}
+            if args.visibility_source == "gt":
+                assert gt_path is not None
+                required_paths["gt"] = gt_path
+            e3_path: Path | None = None
             if args.require_model_assets_root is not None:
+                e3_path = (
+                    args.require_model_assets_root
+                    / "EVOGS_V1"
+                    / frame
+                    / "enhancement_03_enhanced"
+                    / "ply"
+                    / f"{frame}_enhancement.ply"
+                )
                 required_paths.update(
                     {
                         "base": (
@@ -449,14 +478,7 @@ def main() -> None:
                             / "ply"
                             / "point_cloud_8999.ply"
                         ),
-                        "e3": (
-                            args.require_model_assets_root
-                            / "EVOGS_V1"
-                            / frame
-                            / "enhancement_03_enhanced"
-                            / "ply"
-                            / f"{frame}_enhancement.ply"
-                        ),
+                        "e3": e3_path,
                     }
                 )
             missing_paths = {
@@ -478,9 +500,11 @@ def main() -> None:
                     f"Missing frame assets: {missing_paths}"
                 )
 
+            visibility_path = gt_path if args.visibility_source == "gt" else e3_path
+            assert visibility_path is not None
             splats = {
                 key: value.float()
-                for key, value in load_ply_to_splats(str(gt_path)).items()
+                for key, value in load_ply_to_splats(str(visibility_path)).items()
             }
             inputs = visibility_inputs(splats, device)
             viewmat, intrinsics = camera_tensors(
@@ -549,10 +573,15 @@ def main() -> None:
         "pipeline_status": (
             "PASS" if emitted > 0 else "FAIL_NO_ELIGIBLE_FRAMES"
         ),
-        "visibility_source": "DanceNet3D ground-truth standard PLY",
+        "visibility_source": (
+            "DanceNet3D ground-truth standard PLY"
+            if args.visibility_source == "gt"
+            else "trained enhancement-3 frontier standard PLY"
+        ),
+        "visibility_source_role": args.visibility_source,
         "policy_independence": (
-            "Neither Base nor E3 content is read while computing visibility; "
-            "optional existence checks only prevent evaluating untrained frames"
+            "Visibility is computed only from the explicitly selected PLY "
+            "frontier and camera pose"
         ),
         "definition": {
             "gaussian_contributing": (
@@ -571,7 +600,9 @@ def main() -> None:
         },
         "inputs": {
             "trace": str(args.trace.resolve()),
-            "gt_root": str(args.gt_root.resolve()),
+            "gt_root": (
+                str(args.gt_root.resolve()) if args.gt_root is not None else None
+            ),
             "required_model_assets_root": (
                 str(args.require_model_assets_root.resolve())
                 if args.require_model_assets_root is not None

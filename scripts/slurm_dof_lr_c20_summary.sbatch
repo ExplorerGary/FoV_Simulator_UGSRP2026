@@ -7,10 +7,10 @@
 #SBATCH --time=00:15:00
 set -euo pipefail
 REPO="${REPO:-$HOME/FoV_Simulator_UGSRP2026}"
-BNQ_ROOT="${BNQ_ROOT:-/scratch/$USER/fov_dof_lr_c20_bnq_v1}"
+BNQ_ROOT="${BNQ_ROOT:-/scratch/$USER/fov_dof_lr_e3_c20_bnq_v1}"
 GT_ROOT="${GT_SEQUENCE_ROOT:-/scratch/$USER/DanceNet3D_GT/BiancaGolden_CircleTurns}"
 python3 "$REPO/scripts/summarize_lr500_bnq.py" \
   --root "$BNQ_ROOT" --gt-root "$GT_ROOT" \
-  --visibility-root "$BNQ_ROOT/reference_visibility" \
-  --experiment "500ms DoF OLS to 100ms pose, predicted-pose contribution C20" \
-  --variants dof_lr_c20
+  --visibility-root "$BNQ_ROOT/reference_e3_visibility" \
+  --experiment "500ms DoF OLS to 100ms pose, predicted-pose E3 contribution C20" \
+  --variants dof_lr_e3_c20

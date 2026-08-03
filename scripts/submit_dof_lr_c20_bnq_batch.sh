@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 REPO="${REPO:-$HOME/FoV_Simulator_UGSRP2026}"
-BNQ_ROOT="${BNQ_ROOT:-/scratch/$USER/fov_dof_lr_c20_bnq_v1}"
+BNQ_ROOT="${BNQ_ROOT:-/scratch/$USER/fov_dof_lr_e3_c20_bnq_v1}"
 mkdir -p "$BNQ_ROOT/logs"
 TRAIN_JOB=$(sbatch --parsable --export="ALL,REPO=$REPO,BNQ_ROOT=$BNQ_ROOT" \
   --output="$BNQ_ROOT/logs/train-%j.out" --error="$BNQ_ROOT/logs/train-%j.err" \

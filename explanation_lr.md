@@ -293,6 +293,12 @@ viewport-overlap/HPR fraction 与当前 renderer-based
 再让现有 Gaussian visibility generator 接受 predicted-pose override，得到可直接
 用于正式 BNQ 的 renderer-consistent score。
 
+当前端到端 DoF-LR C20 实验使用训练得到的 E3 frontier PLY，而不是 DanceNet3D GT
+PLY，计算预测 pose 下的 `contributing_gaussian_fraction`。真实 pose 下的 cell
+visibility 对照也使用同一 E3 frontier；GT PLY 只用于最终画质指标。每个 cell 的
+E3 score `>= 0.20` 时发送 E3，否则保留 Base。这样 policy signal、预测/真实 cell
+指标和实际被分配的 enhancement representation 保持一致。
+
 ### Visibility score-definition oracle BNQ sweep（待 HPC 结果）
 
 为回答“发送 E3 的 fraction 是否等同于 CellSight visibility”，新增一个严格标记
@@ -624,3 +630,4 @@ current-visibility LR 超过 Persistence。
 | 2026-08-02 | pending | 固定 oracle sweep 的 `contributing_gaussian_fraction >= 0.20`，新增完整 500 ms DoF OLS→100 ms predicted pose→GT geometry visibility→C20 Base/E3→BNQ batch；预测与真实姿态 trace 共用严格对齐的未来帧时间轴。 |
 | 2026-08-02 | pending | 修复 BNQ cell metrics 在缺失 PLY 跳帧后的标签错位：GT visibility 与 decisions 统一按 `source_output_frame + cell_id` 对齐，缺失标签改为显式失败；PSNR/带宽未受旧 bug 影响，MSE/P/R/F-score 需 CPU-only 重汇总。 |
 | 2026-08-02 | pending | BNQ summary 新增连续 cell visibility score 的 `cell_r2 = 1 - SSE/SST`，与 MSE、C20-vs-0.5 的 Precision/Recall/F1/F2 一并汇报。 |
+| 2026-08-03 | pending | 修正 DoF-LR C20 的 visibility source：预测 pose 和真实 pose 的 per-cell score 均改由对应帧 E3 frontier PLY 计算；GT PLY 仅用于最终 QoE reference。新实验写入独立目录 `fov_dof_lr_e3_c20_bnq_v1`，正式 HPC 结果待运行。 |
