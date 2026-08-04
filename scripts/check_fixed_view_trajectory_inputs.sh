@@ -1,21 +1,13 @@
 #!/usr/bin/env bash
-# Read-only preflight for the ten-trace trajectory visualization array.
+# Read-only preflight for the two traces with existing DoF predictions.
 set -euo pipefail
 
 REPO="${REPO:-$HOME/FoV_Simulator_UGSRP2026}"
 PREDICTION_ROOT="${PREDICTION_ROOT:-/scratch/$USER/fov_dof_lr_e3_c20_bnq_v1/dof_lr_e3_c20}"
 GT_PLY_ROOT="${GT_PLY_ROOT:-/scratch/$USER/DanceNet3D_GT/BiancaGolden_CircleTurns}"
 TRACE_NAMES=(
-  "26_7_29_12_33_39"
-  "26_7_29_12_35_7"
   "26_7_29_12_37_21"
-  "26_7_29_12_40_25"
-  "26_7_31_14_59_37"
   "26_7_31_15_1_21"
-  "26_7_31_15_3_19"
-  "26_7_31_15_5_13"
-  "26_7_31_15_6_30"
-  "26_7_31_15_7_7"
 )
 
 missing=0
@@ -41,4 +33,4 @@ if (( missing > 0 )); then
   echo "No model training or prediction was started." >&2
   exit 2
 fi
-echo "PASS: all 10 GT traces and all 10 existing predicted traces are present."
+echo "PASS: both GT traces and both existing predicted traces are present."

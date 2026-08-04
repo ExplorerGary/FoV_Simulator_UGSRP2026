@@ -398,8 +398,8 @@ See [docs/DATA_CONTRACT.md](docs/DATA_CONTRACT.md) for exact schemas and
 
 ## Fixed-view GT/predicted 6DoF trajectory plots
 
-The trajectory visualizer reads `LocationX/Y/Z` from the ten CircleTurns GT
-traces and from already-generated LR `predicted_trace.csv` files. It never
+The trajectory visualizer reads `LocationX/Y/Z` from the two CircleTurns
+traces that already have LR `predicted_trace.csv` files. It never
 fits or runs the LR model. The midpoint DanceNet3D GT PLY is transformed into
 the trace's GSV/Unreal coordinate system and drawn as the common 3D scene.
 Every trace produces four PNGs: the GT point cloud plus blue GT particles and
@@ -409,7 +409,7 @@ same two views with the yellow predicted DoF arc overlaid.
 ```bash
 mkdir -p /scratch/$USER/fixed_view_dof_trajectory/logs
 bash scripts/check_fixed_view_trajectory_inputs.sh
-sbatch --array=0-9%10 \
+sbatch --array=0-1%2 \
   --output=/scratch/$USER/fixed_view_dof_trajectory/logs/trajectory-%A_%a.out \
   --error=/scratch/$USER/fixed_view_dof_trajectory/logs/trajectory-%A_%a.err \
   scripts/slurm_fixed_view_trajectory_array.sbatch
@@ -423,8 +423,11 @@ The default existing-prediction layout is:
 ```
 
 Override `PREDICTION_ROOT` at submission if the existing files use another
-root. The read-only preflight checks all twenty inputs before submission. A
+root. The read-only preflight checks both GT/prediction pairs before
+submission. A
 missing predicted CSV is a hard failure; neither the preflight nor the array
 job regenerates it. Outputs are placed under
 `/scratch/$USER/fixed_view_dof_trajectory/<TRACE>/`, including a JSON sidecar
 with the GT PLY asset ID, common-time position error, and exact camera angles.
+The job samples 20,000 GT points and 180 trajectory particles for an intended
+runtime near ten seconds; Slurm reserves one minute to cover launch overhead.

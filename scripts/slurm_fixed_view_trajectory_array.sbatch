@@ -3,23 +3,15 @@
 #SBATCH --account=torch_pr_1093_tandon_priority
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=8G
-#SBATCH --time=00:15:00
+#SBATCH --time=00:01:00
 
 set -euo pipefail
 
 REPO="${REPO:-$HOME/FoV_Simulator_UGSRP2026}"
-TASK_ID="${SLURM_ARRAY_TASK_ID:?Submit with --array=0-9}"
+TASK_ID="${SLURM_ARRAY_TASK_ID:?Submit with --array=0-1}"
 TRACE_NAMES=(
-  "26_7_29_12_33_39"
-  "26_7_29_12_35_7"
   "26_7_29_12_37_21"
-  "26_7_29_12_40_25"
-  "26_7_31_14_59_37"
   "26_7_31_15_1_21"
-  "26_7_31_15_3_19"
-  "26_7_31_15_5_13"
-  "26_7_31_15_6_30"
-  "26_7_31_15_7_7"
 )
 if (( TASK_ID < 0 || TASK_ID >= ${#TRACE_NAMES[@]} )); then
   echo "Array index $TASK_ID is outside 0-$(( ${#TRACE_NAMES[@]} - 1 ))" >&2
@@ -56,10 +48,10 @@ apptainer exec \
     --gt-ply-root "$GT_PLY_ROOT" \
     --output-dir "$OUTPUT_DIR" \
     --start-mode tracked-gaze \
-    --particle-count 240 \
-    --point-cloud-points 60000 \
+    --particle-count 180 \
+    --point-cloud-points 20000 \
     --camera-a-elevation 24 \
     --camera-a-azimuth -58 \
     --camera-b-elevation 18 \
     --camera-b-azimuth 122 \
-    --dpi 180
+    --dpi 150
