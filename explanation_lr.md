@@ -631,3 +631,4 @@ current-visibility LR 超过 Persistence。
 | 2026-08-02 | pending | 修复 BNQ cell metrics 在缺失 PLY 跳帧后的标签错位：GT visibility 与 decisions 统一按 `source_output_frame + cell_id` 对齐，缺失标签改为显式失败；PSNR/带宽未受旧 bug 影响，MSE/P/R/F-score 需 CPU-only 重汇总。 |
 | 2026-08-02 | pending | BNQ summary 新增连续 cell visibility score 的 `cell_r2 = 1 - SSE/SST`，与 MSE、C20-vs-0.5 的 Precision/Recall/F1/F2 一并汇报。 |
 | 2026-08-03 | pending | 修正 DoF-LR C20 的 visibility source：预测 pose 和真实 pose 的 per-cell score 均改由对应帧 E3 frontier PLY 计算；GT PLY 仅用于最终 QoE reference。新实验写入独立目录 `fov_dof_lr_e3_c20_bnq_v1`，正式 HPC 结果待运行。 |
+| 2026-08-03 | pending | 新增 CPU-only 双固定机位 6DoF 轨迹可视化：以对齐坐标系的中点 DanceNet3D GT PLY 为背景，对 10 个 CircleTurns trace 分别输出蓝色 GT-only 弧线和蓝色 GT + 黄色已有 LR predicted DoF 合成弧线；Slurm array 只读现有 prediction CSV，缺失时失败，不重新训练或推理。 |

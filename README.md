@@ -395,3 +395,36 @@ need checkpoint/tree-lineage reconstruction.
 
 See [docs/DATA_CONTRACT.md](docs/DATA_CONTRACT.md) for exact schemas and
 [docs/PARALLELISM.md](docs/PARALLELISM.md) for HPC scaling guidance.
+
+## Fixed-view GT/predicted 6DoF trajectory plots
+
+The trajectory visualizer reads `LocationX/Y/Z` from the ten CircleTurns GT
+traces and from already-generated LR `predicted_trace.csv` files. It never
+fits or runs the LR model. The midpoint DanceNet3D GT PLY is transformed into
+the trace's GSV/Unreal coordinate system and drawn as the common 3D scene.
+Every trace produces four PNGs: the GT point cloud plus blue GT particles and
+their connecting motion arc from two fixed external cameras, followed by the
+same two views with the yellow predicted DoF arc overlaid.
+
+```bash
+mkdir -p /scratch/$USER/fixed_view_dof_trajectory/logs
+bash scripts/check_fixed_view_trajectory_inputs.sh
+sbatch --array=0-9%10 \
+  --output=/scratch/$USER/fixed_view_dof_trajectory/logs/trajectory-%A_%a.out \
+  --error=/scratch/$USER/fixed_view_dof_trajectory/logs/trajectory-%A_%a.err \
+  scripts/slurm_fixed_view_trajectory_array.sbatch
+```
+
+The default existing-prediction layout is:
+
+```text
+/scratch/$USER/fov_dof_lr_e3_c20_bnq_v1/dof_lr_e3_c20/
+  <TRACE>/00_pose/predicted_trace.csv
+```
+
+Override `PREDICTION_ROOT` at submission if the existing files use another
+root. The read-only preflight checks all twenty inputs before submission. A
+missing predicted CSV is a hard failure; neither the preflight nor the array
+job regenerates it. Outputs are placed under
+`/scratch/$USER/fixed_view_dof_trajectory/<TRACE>/`, including a JSON sidecar
+with the GT PLY asset ID, common-time position error, and exact camera angles.
