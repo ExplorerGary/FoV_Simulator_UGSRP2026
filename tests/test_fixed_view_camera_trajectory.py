@@ -17,6 +17,12 @@ SPEC.loader.exec_module(fixed_view)
 
 
 class FixedViewTrajectoryTests(unittest.TestCase):
+    def test_requested_combined_title_is_exact(self) -> None:
+        self.assertEqual(
+            fixed_view.COMBINED_TITLE,
+            "Ground Truth DoF vs Predicted DoF",
+        )
+
     def test_two_distinct_fixed_views_are_defined(self) -> None:
         self.assertEqual(len(fixed_view.DEFAULT_VIEWS), 2)
         self.assertNotEqual(

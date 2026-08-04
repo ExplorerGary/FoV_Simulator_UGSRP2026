@@ -429,5 +429,7 @@ missing predicted CSV is a hard failure; neither the preflight nor the array
 job regenerates it. Outputs are placed under
 `/scratch/$USER/fixed_view_dof_trajectory/<TRACE>/`, including a JSON sidecar
 with the GT PLY asset ID, common-time position error, and exact camera angles.
-The job samples 20,000 GT points and 180 trajectory particles for an intended
-runtime near ten seconds; Slurm reserves one minute to cover launch overhead.
+The job keeps the complete DanceNet3D GT dancer (`--point-cloud-points 0`) and
+uses 180 trajectory particles. For each camera it renders the complete scene
+once, saves the blue GT-only view, then adds the yellow prediction and saves
+the combined view. The combined title is `Ground Truth DoF vs Predicted DoF`.

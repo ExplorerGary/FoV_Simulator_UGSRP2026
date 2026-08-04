@@ -20,6 +20,8 @@ EVOGS_TO_GSV = np.asarray(
 )
 GT_BLUE = "#0877e8"
 PREDICTED_YELLOW = "#f5c400"
+GT_TITLE = "Ground Truth DoF"
+COMBINED_TITLE = "Ground Truth DoF vs Predicted DoF"
 
 
 @dataclass(frozen=True)
@@ -45,7 +47,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--asset-frame-offset", type=int, default=1)
-    parser.add_argument("--point-cloud-points", type=int, default=60000)
+    parser.add_argument(
+        "--point-cloud-points", type=int, default=0,
+        help="Maximum GT points to draw; 0 keeps the complete dancer",
+    )
     parser.add_argument("--particle-count", type=int, default=240)
     parser.add_argument("--dpi", type=int, default=180)
     parser.add_argument("--camera-a-elevation", type=float, default=24.0)
@@ -152,8 +157,8 @@ def load_gt_point_cloud(
 ) -> tuple[np.ndarray, np.ndarray]:
     from plyfile import PlyData
 
-    if max_points < 1:
-        raise ValueError("point-cloud-points must be positive")
+    if max_points < 0:
+        raise ValueError("point-cloud-points must be non-negative")
     vertices = PlyData.read(str(path))["vertex"].data
     names = set(vertices.dtype.names or ())
     points_m = np.column_stack((vertices["x"], vertices["y"], vertices["z"])).astype(
@@ -172,7 +177,7 @@ def load_gt_point_cloud(
         colors = np.clip(colors, 0.0, 1.0)
     else:
         colors = np.full((len(points_m), 3), 0.58, dtype=np.float64)
-    if len(points_m) > max_points:
+    if max_points > 0 and len(points_m) > max_points:
         rng = np.random.default_rng(seed)
         indices = rng.choice(len(points_m), max_points, replace=False)
         points_m = points_m[indices]
@@ -203,15 +208,15 @@ def equal_axis_limits(
     return tuple((float(value - radius), float(value + radius)) for value in center)
 
 
-def plot_view(
-    trace_name: str,
+def plot_view_pair(
     scene_points: np.ndarray,
     scene_colors: np.ndarray,
     gt_xyz: np.ndarray,
-    predicted_xyz: np.ndarray | None,
+    predicted_xyz: np.ndarray,
     view: FixedView,
     limits: tuple[tuple[float, float], ...],
-    output: Path,
+    gt_output: Path,
+    combined_output: Path,
     dpi: int,
 ) -> None:
     import matplotlib
@@ -224,7 +229,7 @@ def plot_view(
 
     axis.scatter(
         scene_points[:, 0], scene_points[:, 1], scene_points[:, 2],
-        s=0.28, c=scene_colors, alpha=0.18, linewidths=0,
+        s=0.55, c=scene_colors, alpha=0.72, linewidths=0,
         depthshade=False, rasterized=True, label="DanceNet3D GT",
         zorder=1,
     )
@@ -238,17 +243,6 @@ def plot_view(
         s=22, c=GT_BLUE, edgecolors="white", linewidths=0.28,
         alpha=0.96, depthshade=False, label="GT DoF", zorder=8,
     )
-    if predicted_xyz is not None:
-        axis.plot(
-            predicted_xyz[:, 0], predicted_xyz[:, 1], predicted_xyz[:, 2],
-            color=PREDICTED_YELLOW, linewidth=2.2, alpha=0.92, zorder=9,
-        )
-        axis.scatter(
-            predicted_xyz[:, 0], predicted_xyz[:, 1], predicted_xyz[:, 2],
-            s=20, c=PREDICTED_YELLOW, edgecolors="#6b5700", linewidths=0.25,
-            alpha=0.94, depthshade=False, label="Predicted DoF", zorder=10,
-        )
-
     xlim, ylim, zlim = limits
     axis.set_xlim(*xlim)
     axis.set_ylim(*ylim)
@@ -260,20 +254,22 @@ def plot_view(
     axis.set_zlabel("Z / height (cm)", labelpad=9)
     axis.grid(True, alpha=0.28)
     axis.legend(loc="upper left", framealpha=0.95)
-    mode = "GT + predicted DoF" if predicted_xyz is not None else "GT DoF only"
-    axis.set_title(
-        f"{trace_name} - {mode}\n"
-        f"{view.name}: elevation {view.elevation_degrees:g} deg, "
-        f"azimuth {view.azimuth_degrees:g} deg",
-        pad=17,
+    axis.set_title(GT_TITLE, pad=17)
+    gt_output.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(gt_output, dpi=dpi, bbox_inches="tight")
+
+    axis.plot(
+        predicted_xyz[:, 0], predicted_xyz[:, 1], predicted_xyz[:, 2],
+        color=PREDICTED_YELLOW, linewidth=2.2, alpha=0.92, zorder=9,
     )
-    figure.text(
-        0.5, 0.025,
-        "Each particle is a sampled 3D camera position; the connecting line reveals the motion arc.",
-        ha="center", fontsize=9.5, color="#444444",
+    axis.scatter(
+        predicted_xyz[:, 0], predicted_xyz[:, 1], predicted_xyz[:, 2],
+        s=20, c=PREDICTED_YELLOW, edgecolors="#6b5700", linewidths=0.25,
+        alpha=0.94, depthshade=False, label="Predicted DoF", zorder=10,
     )
-    output.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(output, dpi=dpi, bbox_inches="tight")
+    axis.set_title(COMBINED_TITLE, pad=17)
+    axis.legend(loc="upper left", framealpha=0.95)
+    figure.savefig(combined_output, dpi=dpi, bbox_inches="tight")
     plt.close(figure)
 
 
@@ -330,13 +326,9 @@ def main() -> int:
     for view in views:
         gt_output = args.output_dir / f"gt_only_{view.name}.png"
         combined_output = args.output_dir / f"gt_predicted_{view.name}.png"
-        plot_view(
-            args.gt_trace.stem, scene_points, scene_colors, gt_full_xyz, None,
-            view, limits, gt_output, args.dpi,
-        )
-        plot_view(
-            args.gt_trace.stem, scene_points, scene_colors, gt_aligned_xyz,
-            predicted_xyz, view, limits, combined_output, args.dpi,
+        plot_view_pair(
+            scene_points, scene_colors, gt_full_xyz, predicted_xyz, view,
+            limits, gt_output, combined_output, args.dpi,
         )
         outputs[f"gt_only_{view.name}"] = str(gt_output.resolve())
         outputs[f"gt_predicted_{view.name}"] = str(combined_output.resolve())

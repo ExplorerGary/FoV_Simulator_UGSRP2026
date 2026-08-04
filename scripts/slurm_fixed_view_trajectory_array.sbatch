@@ -49,7 +49,7 @@ apptainer exec \
     --output-dir "$OUTPUT_DIR" \
     --start-mode tracked-gaze \
     --particle-count 180 \
-    --point-cloud-points 20000 \
+    --point-cloud-points 0 \
     --camera-a-elevation 24 \
     --camera-a-azimuth -58 \
     --camera-b-elevation 18 \
