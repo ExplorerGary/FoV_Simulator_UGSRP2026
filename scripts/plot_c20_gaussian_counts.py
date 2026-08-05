@@ -13,7 +13,7 @@ TRACE = "26_7_29_12_37_21"
 SERIES = (
     ("gt_gaussian_count", "DanceNet3D GT", "#D62728", ""),
     ("base_gaussian_count", "Full Base", "#7F7F7F", ""),
-    ("full_e3_gaussian_count", "Full E3", "#6BAED6", "8 5"),
+    ("full_e3_gaussian_count", "Full E3", "#E3B341", "8 5"),
     ("policy_gaussian_count", "Policy", "#08519C", ""),
 )
 
