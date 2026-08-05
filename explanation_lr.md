@@ -299,6 +299,25 @@ visibility 对照也使用同一 E3 frontier；GT PLY 只用于最终画质指�
 E3 score `>= 0.20` 时发送 E3，否则保留 Base。这样 policy signal、预测/真实 cell
 指标和实际被分配的 enhancement representation 保持一致。
 
+### DoF-LR C20 matched Base/E3/Policy 结果（2026-08-05）
+
+两条 test trace 使用同一组 `actual_trace.csv`、frame/source-frame/asset 对齐与 GT，
+合计 3548 帧。PSNR 是先合并逐帧 MSE 后计算的 sequence PSNR；SSIM 与 LPIPS-Alex
+是逐帧算术平均。Matched Base-only 逐行复用 C20 policy 的 frame set，但将所有 cell
+固定为 Base；逐帧检查确认其 `policy_gaussian_count == base_gaussian_count`，且三种
+representation 的 Full E3 reference 完全一致。
+
+| Representation | Mean Gaussian count | PSNR vs GT | SSIM vs GT | LPIPS-Alex vs GT |
+|---|---:|---:|---:|---:|
+| Full Base | 4,735.389 | 25.856 dB | 0.970252 | 0.051326 |
+| Full E3 | 18,538.864 | 29.312 dB | 0.978442 | 0.036289 |
+| DoF-LR C20 Policy | 10,625.795 | 29.104 dB | 0.977659 | 0.036786 |
+
+Policy 相对 Full E3 减少 42.68% Gaussian points，sequence PSNR 仅降低 0.209 dB；
+Full Base 相对 Full E3 减少 74.46% points，但降低 3.457 dB。逐帧 Gaussian-count
+折线图直接读取两条 QoE `per_frame_metrics.csv` 中的 `base_gaussian_count`、
+`full_e3_gaussian_count` 与 `policy_gaussian_count`。
+
 ### Visibility score-definition oracle BNQ sweep（待 HPC 结果）
 
 为回答“发送 E3 的 fraction 是否等同于 CellSight visibility”，新增一个严格标记
@@ -635,3 +654,4 @@ current-visibility LR 超过 Persistence。
 | 2026-08-04 | pending | 双固定机位 6DoF 轨迹可视化在 tracked-gaze 起点后额外裁掉 2.0 秒，以排除 recorder 尚未就绪时的 `(-200, 0, 30)`；完整 DanceNet3D GT PLY 改为按裁剪后时间窗口的中点 timestamp 选择（asset offset `+1`），其余蓝色 GT/黄色 prediction 定义不变。 |
 | 2026-08-04 | pending | 为 DoF-LR C20 的两条现有 `actual_trace.csv` 增加 matched Base-only QoE batch：逐行复用原 C20 decision 的 frame/source-frame/asset 对齐，仅将所有 cell 固定为 Base，并在独立目录输出 PSNR/SSIM/LPIPS；结果待 HPC。 |
 | 2026-08-04 | pending | 新增 DoF-LR C20 逐帧 Gaussian-count 折线图：两条 test trace 分面展示 Full Base、Full E3 与 Policy，直接读取现有 3548 条 `per_frame_metrics.csv`，不依赖 Base-only QoE 补跑。 |
+| 2026-08-05 | pending | Matched Base-only 两个 GPU task 与依赖汇总全部完成并拉回本地；3548 帧逐帧验证 Base policy GS count 与 Base PLY 相等、Full E3 reference 与原 C20 完全一致，归档三挡位平均 GS count 与 PSNR/SSIM/LPIPS。 |
