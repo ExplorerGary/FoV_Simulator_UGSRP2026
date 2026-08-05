@@ -433,3 +433,7 @@ The job keeps the complete DanceNet3D GT dancer (`--point-cloud-points 0`) and
 uses 180 trajectory particles. For each camera it renders the complete scene
 once, saves the blue GT-only view, then adds the yellow prediction and saves
 the combined view. The combined title is `Ground Truth DoF vs Predicted DoF`.
+The maintained Slurm job discards an additional 2.0 seconds after the first
+tracked-gaze pose so recorder startup values such as `(-200, 0, 30)` do not
+enter either arc. The displayed PLY is selected nearest the midpoint timestamp
+of that trimmed visualization window, then mapped with asset offset `+1`.

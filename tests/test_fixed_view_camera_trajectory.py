@@ -46,6 +46,16 @@ class FixedViewTrajectoryTests(unittest.TestCase):
         np.testing.assert_allclose(times, [2.0, 3.0, 4.0])
         np.testing.assert_allclose(xyz[1], [1.0, 2.0, 3.0])
 
+    def test_representative_ply_uses_time_window_midpoint(self) -> None:
+        rows = [
+            {"timestamp_s": 0.0, "gsv_frame": 1},
+            {"timestamp_s": 1.0, "gsv_frame": 2},
+            {"timestamp_s": 8.0, "gsv_frame": 3},
+            {"timestamp_s": 10.0, "gsv_frame": 4},
+        ]
+        selected = fixed_view.representative_gt_row(rows, 2.0, 10.0)
+        self.assertEqual(selected["gsv_frame"], 3)
+
     def test_equal_axis_limits_use_common_span_and_include_prediction(self) -> None:
         scene = np.asarray([[-10.0, -10.0, -10.0], [10.0, 10.0, 10.0]])
         gt = np.asarray([[0.0, 0.0, 0.0], [10.0, 20.0, 30.0]])

@@ -63,6 +63,10 @@ def parse_args() -> argparse.Namespace:
         default="tracked-gaze",
         help="Trim untracked spawn rows from the GT trace",
     )
+    parser.add_argument(
+        "--start-offset-seconds", type=float, default=0.0,
+        help="Additional seconds to discard after the selected tracked start",
+    )
     return parser.parse_args()
 
 
@@ -148,8 +152,11 @@ def resample_interval(
     return times, interpolate_positions(rows, times)
 
 
-def representative_gt_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    return rows[len(rows) // 2]
+def representative_gt_row(
+    rows: list[dict[str, Any]], start_time: float, end_time: float
+) -> dict[str, Any]:
+    midpoint = (start_time + end_time) / 2.0
+    return min(rows, key=lambda row: abs(float(row["timestamp_s"]) - midpoint))
 
 
 def load_gt_point_cloud(
@@ -297,17 +304,30 @@ def main() -> int:
 
     gt_rows = trim_trace(load_trace(args.gt_trace), args.start_mode)
     predicted_rows = load_trace(args.predicted_trace)
-    overlap_start = max(gt_rows[0]["timestamp_s"], predicted_rows[0]["timestamp_s"])
+    if args.start_offset_seconds < 0.0:
+        raise ValueError("start-offset-seconds must be non-negative")
+    tracked_start = float(gt_rows[0]["timestamp_s"])
+    visualization_start = tracked_start + args.start_offset_seconds
+    visualization_end = float(gt_rows[-1]["timestamp_s"])
+    if visualization_start >= visualization_end:
+        raise ValueError(
+            "start-offset-seconds removes the complete GT trace interval"
+        )
+    overlap_start = max(visualization_start, predicted_rows[0]["timestamp_s"])
     overlap_end = min(gt_rows[-1]["timestamp_s"], predicted_rows[-1]["timestamp_s"])
     if overlap_end <= overlap_start:
         raise ValueError("GT and predicted traces have no overlapping timestamps")
 
-    gt_times, gt_full_xyz = resample_interval(gt_rows, args.particle_count)
+    gt_times, gt_full_xyz = resample_interval(
+        gt_rows, args.particle_count, visualization_start, visualization_end
+    )
     comparison_times, gt_aligned_xyz = resample_interval(
         gt_rows, args.particle_count, overlap_start, overlap_end
     )
     predicted_xyz = interpolate_positions(predicted_rows, comparison_times)
-    snapshot_row = representative_gt_row(gt_rows)
+    snapshot_row = representative_gt_row(
+        gt_rows, visualization_start, visualization_end
+    )
     snapshot_asset_id = int(snapshot_row["gsv_frame"]) + args.asset_frame_offset
     snapshot_path = args.gt_ply_root / f"{snapshot_asset_id:07d}.ply"
     if not snapshot_path.is_file():
@@ -344,6 +364,8 @@ def main() -> int:
         "dancenet_gt_point_cloud": str(snapshot_path.resolve()),
         "dancenet_gt_asset_id": snapshot_asset_id,
         "point_cloud_points_rendered": int(len(scene_points)),
+        "tracked_start_s": tracked_start,
+        "start_offset_seconds": args.start_offset_seconds,
         "gt_full_time_range_s": [float(gt_times[0]), float(gt_times[-1])],
         "comparison_time_range_s": [float(comparison_times[0]), float(comparison_times[-1])],
         "particles_per_trajectory": args.particle_count,

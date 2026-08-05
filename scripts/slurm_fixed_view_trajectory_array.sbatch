@@ -48,6 +48,7 @@ apptainer exec \
     --gt-ply-root "$GT_PLY_ROOT" \
     --output-dir "$OUTPUT_DIR" \
     --start-mode tracked-gaze \
+    --start-offset-seconds 2.0 \
     --particle-count 180 \
     --point-cloud-points 0 \
     --camera-a-elevation 24 \
