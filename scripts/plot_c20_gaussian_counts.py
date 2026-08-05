@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot per-frame Full Base, Full E3, and C20 policy Gaussian counts."""
+"""Plot per-frame Gaussian counts for the fixed C20 reporting trace."""
 
 from __future__ import annotations
 
@@ -9,11 +9,12 @@ import math
 from pathlib import Path
 
 
-TRACES = ("26_7_29_12_37_21", "26_7_31_15_1_21")
+TRACE = "26_7_29_12_37_21"
 SERIES = (
-    ("base_gaussian_count", "Full Base", "#4C78A8"),
-    ("full_e3_gaussian_count", "Full E3", "#E45756"),
-    ("policy_gaussian_count", "Policy", "#59A14F"),
+    ("gt_gaussian_count", "DanceNet3D GT", "#D62728", ""),
+    ("base_gaussian_count", "Full Base", "#7F7F7F", ""),
+    ("full_e3_gaussian_count", "Full E3", "#6BAED6", "8 5"),
+    ("policy_gaussian_count", "Policy", "#08519C", ""),
 )
 
 
@@ -23,7 +24,7 @@ def parse_args() -> argparse.Namespace:
         "--root",
         type=Path,
         default=Path("outputs/hpc_dof_lr_c20/dof_lr_c20"),
-        help="Directory containing one subdirectory per C20 trace",
+        help="Directory containing the fixed C20 trace",
     )
     parser.add_argument(
         "--output",
@@ -38,7 +39,7 @@ def load_trace(path: Path) -> list[dict[str, str]]:
         rows = list(csv.DictReader(stream))
     if not rows:
         raise ValueError(f"Metrics CSV is empty: {path}")
-    required = {"output_time_s", *(name for name, _, _ in SERIES)}
+    required = {"output_time_s", *(name for name, _, _, _ in SERIES)}
     missing = sorted(required - set(rows[0]))
     if missing:
         raise ValueError(f"Metrics CSV is missing columns {missing}: {path}")
@@ -47,79 +48,80 @@ def load_trace(path: Path) -> list[dict[str, str]]:
 
 def main() -> None:
     args = parse_args()
-    datasets: list[tuple[str, list[dict[str, str]]]] = []
-    global_max = 0
-    for trace in TRACES:
-        metrics = args.root / trace / "02_bandwidth_qoe" / "per_frame_metrics.csv"
-        rows = load_trace(metrics)
-        datasets.append((trace, rows))
-        global_max = max(
-            global_max,
-            *(int(float(row[column])) for row in rows for column, _, _ in SERIES),
-        )
+    metrics = args.root / TRACE / "02_bandwidth_qoe" / "per_frame_metrics.csv"
+    rows = load_trace(metrics)
+    times = [float(row["output_time_s"]) for row in rows]
+    times = [value - times[0] for value in times]
+    x_max = max(times) or 1.0
 
-    width, height = 1600, 920
-    left, right, top, bottom = 105, 45, 112, 62
-    panel_gap = 82
-    panel_height = (height - top - bottom - panel_gap) / 2
-    plot_width = width - left - right
-    tick_step = 5000
+    global_max = max(
+        int(float(row[column]))
+        for row in rows
+        for column, _, _, _ in SERIES
+    )
+    tick_step = 10000
     y_max = max(tick_step, math.ceil(global_max / tick_step) * tick_step)
+
+    width, height = 2000, 650
+    left, right, top, bottom = 115, 55, 112, 78
+    plot_width = width - left - right
+    plot_height = height - top - bottom
+    plot_bottom = top + plot_height
+    x_map = lambda value: left + value / x_max * plot_width
+    y_map = lambda value: plot_bottom - value / y_max * plot_height
+
     svg = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        '<title>Gaussian Count Over Time</title>',
+        f'<desc>Per-frame Gaussian counts for trace {TRACE}, comparing DanceNet3D GT, Full Base, Full E3, and Policy.</desc>',
         '<rect width="100%" height="100%" fill="#ffffff"/>',
-        '<style>text{font-family:Arial,sans-serif;fill:#202124}.title{font-size:26px;font-weight:600}.panel{font-size:19px;font-weight:600}.axis{font-size:14px}.legend{font-size:14px}.grid{stroke:#d9dde3;stroke-width:1}.frame{stroke:#60656d;stroke-width:1.2;fill:none}</style>',
-        f'<text class="title" x="{width / 2}" y="38" text-anchor="middle">C20 Gaussian Count Over Time</text>',
+        '<style>text{font-family:Arial,sans-serif;fill:#202124}.title{font-size:28px;font-weight:600}.subtitle{font-size:16px}.axis{font-size:15px}.legend{font-size:15px}.grid{stroke:#d9dde3;stroke-width:1}.frame{stroke:#60656d;stroke-width:1.2;fill:none}</style>',
+        f'<text class="title" x="{width/2}" y="40" text-anchor="middle">Gaussian Count Over Time</text>',
+        f'<text class="subtitle" x="{width/2}" y="68" text-anchor="middle">Trace {TRACE} · {len(rows):,} frames</text>',
     ]
 
-    for panel_index, (trace, rows) in enumerate(datasets):
-        panel_top = top + panel_index * (panel_height + panel_gap)
-        panel_bottom = panel_top + panel_height
-        times = [float(row["output_time_s"]) for row in rows]
-        times = [value - times[0] for value in times]
-        x_max = max(times) or 1.0
-        x_map = lambda value: left + value / x_max * plot_width
-        y_map = lambda value: panel_bottom - value / y_max * panel_height
+    for value in range(0, y_max + 1, tick_step):
+        y = y_map(value)
+        svg.append(f'<line class="grid" x1="{left}" y1="{y:.2f}" x2="{width-right}" y2="{y:.2f}"/>')
+        svg.append(f'<text class="axis" x="{left-14}" y="{y+5:.2f}" text-anchor="end">{value/1000:g}k</text>')
+    for fraction in (0.0, 0.2, 0.4, 0.6, 0.8, 1.0):
+        value = fraction * x_max
+        x = x_map(value)
+        svg.append(f'<line class="grid" x1="{x:.2f}" y1="{top}" x2="{x:.2f}" y2="{plot_bottom}"/>')
+        svg.append(f'<text class="axis" x="{x:.2f}" y="{plot_bottom+27}" text-anchor="middle">{value:.0f}</text>')
+    svg.append(f'<rect class="frame" x="{left}" y="{top}" width="{plot_width}" height="{plot_height}"/>')
 
-        svg.append(
-            f'<text class="panel" x="{left}" y="{panel_top - 25}">Trace {trace} — {len(rows):,} frames</text>'
+    legend_width = 270
+    legend_start = width / 2 - legend_width * len(SERIES) / 2
+    for index, (column, label, color, dash) in enumerate(SERIES):
+        values = [int(float(row[column])) for row in rows]
+        mean = sum(values) / len(values)
+        points = " ".join(
+            f"{x_map(time):.2f},{y_map(value):.2f}"
+            for time, value in zip(times, values, strict=True)
         )
-        for value in range(0, y_max + 1, tick_step):
-            y = y_map(value)
-            svg.append(f'<line class="grid" x1="{left}" y1="{y:.2f}" x2="{width-right}" y2="{y:.2f}"/>')
-            svg.append(f'<text class="axis" x="{left-12}" y="{y+5:.2f}" text-anchor="end">{value/1000:g}k</text>')
-        for fraction in (0.0, 0.25, 0.5, 0.75, 1.0):
-            value = fraction * x_max
-            x = x_map(value)
-            svg.append(f'<line class="grid" x1="{x:.2f}" y1="{panel_top}" x2="{x:.2f}" y2="{panel_bottom}"/>')
-            svg.append(f'<text class="axis" x="{x:.2f}" y="{panel_bottom+25}" text-anchor="middle">{value:.0f}</text>')
-        svg.append(f'<rect class="frame" x="{left}" y="{panel_top}" width="{plot_width}" height="{panel_height}"/>')
-
-        for column, label, color in SERIES:
-            values = [int(float(row[column])) for row in rows]
-            mean = sum(values) / len(values)
-            points = " ".join(
-                f"{x_map(time):.2f},{y_map(value):.2f}"
-                for time, value in zip(times, values, strict=True)
-            )
-            svg.append(
-                f'<polyline points="{points}" fill="none" stroke="{color}" stroke-width="1.4" stroke-linejoin="round"/>'
-            )
-            legend_index = next(i for i, item in enumerate(SERIES) if item[0] == column)
-            legend_x = width - right - 600 + legend_index * 205
-            legend_y = panel_top - 25
-            svg.append(f'<line x1="{legend_x}" y1="{legend_y-5}" x2="{legend_x+25}" y2="{legend_y-5}" stroke="{color}" stroke-width="3"/>')
-            svg.append(f'<text class="legend" x="{legend_x+33}" y="{legend_y}">{label} ({mean:,.0f})</text>')
-
+        dash_attr = f' stroke-dasharray="{dash}"' if dash else ""
         svg.append(
-            f'<text class="axis" x="{left + plot_width/2}" y="{panel_bottom+48}" text-anchor="middle">Elapsed time (s)</text>'
+            f'<polyline points="{points}" fill="none" stroke="{color}" stroke-width="2"{dash_attr} stroke-linejoin="round"/>'
         )
-        center_y = panel_top + panel_height / 2
+        legend_x = legend_start + index * legend_width
+        legend_y = 92
         svg.append(
-            f'<text class="axis" x="25" y="{center_y}" text-anchor="middle" transform="rotate(-90 25 {center_y})">Gaussian count</text>'
+            f'<line x1="{legend_x}" y1="{legend_y-5}" x2="{legend_x+32}" y2="{legend_y-5}" stroke="{color}" stroke-width="3"{dash_attr}/>'
+        )
+        svg.append(
+            f'<text class="legend" x="{legend_x+41}" y="{legend_y}">{label} (mean {mean:,.0f})</text>'
         )
 
+    svg.append(
+        f'<text class="axis" x="{left+plot_width/2}" y="{height-22}" text-anchor="middle">Elapsed time (s)</text>'
+    )
+    center_y = top + plot_height / 2
+    svg.append(
+        f'<text class="axis" x="27" y="{center_y}" text-anchor="middle" transform="rotate(-90 27 {center_y})">Gaussian count</text>'
+    )
     svg.append('</svg>')
+
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text("\n".join(svg), encoding="utf-8")
     print(args.output.resolve())

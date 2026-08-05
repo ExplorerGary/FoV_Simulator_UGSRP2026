@@ -315,8 +315,10 @@ representation 的 Full E3 reference 完全一致。
 
 Policy 相对 Full E3 减少 42.68% Gaussian points，sequence PSNR 仅降低 0.209 dB；
 Full Base 相对 Full E3 减少 74.46% points，但降低 3.457 dB。逐帧 Gaussian-count
-折线图直接读取两条 QoE `per_frame_metrics.csv` 中的 `base_gaussian_count`、
-`full_e3_gaussian_count` 与 `policy_gaussian_count`。
+折线图固定使用 `26_7_29_12_37_21` trace，直接读取其 QoE
+`per_frame_metrics.csv` 中的 `gt_gaussian_count`、`base_gaussian_count`、
+`full_e3_gaussian_count` 与 `policy_gaussian_count`，分别展示 DanceNet3D GT、
+Full Base、Full E3 与 Policy。
 
 ### Visibility score-definition oracle BNQ sweep（待 HPC 结果）
 
@@ -655,3 +657,4 @@ current-visibility LR 超过 Persistence。
 | 2026-08-04 | pending | 为 DoF-LR C20 的两条现有 `actual_trace.csv` 增加 matched Base-only QoE batch：逐行复用原 C20 decision 的 frame/source-frame/asset 对齐，仅将所有 cell 固定为 Base，并在独立目录输出 PSNR/SSIM/LPIPS；结果待 HPC。 |
 | 2026-08-04 | pending | 新增 DoF-LR C20 逐帧 Gaussian-count 折线图：两条 test trace 分面展示 Full Base、Full E3 与 Policy，直接读取现有 3548 条 `per_frame_metrics.csv`，不依赖 Base-only QoE 补跑。 |
 | 2026-08-05 | pending | Matched Base-only 两个 GPU task 与依赖汇总全部完成并拉回本地；3548 帧逐帧验证 Base policy GS count 与 Base PLY 相等、Full E3 reference 与原 C20 完全一致，归档三挡位平均 GS count 与 PSNR/SSIM/LPIPS。 |
+| 2026-08-05 | pending | Gaussian-count overtime 图固定为 `26_7_29_12_37_21` 单 trace、加宽为 2000×650，并加入 DanceNet3D GT；配色为 GT 红、Base 灰、Policy 深蓝、Full E3 浅蓝虚线，标题固定为 `Gaussian Count Over Time` 并保留四项图例。 |
