@@ -633,3 +633,5 @@ current-visibility LR 超过 Persistence。
 | 2026-08-03 | pending | 修正 DoF-LR C20 的 visibility source：预测 pose 和真实 pose 的 per-cell score 均改由对应帧 E3 frontier PLY 计算；GT PLY 仅用于最终 QoE reference。新实验写入独立目录 `fov_dof_lr_e3_c20_bnq_v1`，正式 HPC 结果待运行。 |
 | 2026-08-03 | `f710616` | 新增 CPU-only 双固定机位 6DoF 轨迹可视化：使用完整 DanceNet3D GT PLY，仅处理已有 prediction 的 2 个 CircleTurns trace，输出蓝色 GT-only 与蓝色 GT + 黄色 predicted DoF 合成视图。 |
 | 2026-08-04 | pending | 双固定机位 6DoF 轨迹可视化在 tracked-gaze 起点后额外裁掉 2.0 秒，以排除 recorder 尚未就绪时的 `(-200, 0, 30)`；完整 DanceNet3D GT PLY 改为按裁剪后时间窗口的中点 timestamp 选择（asset offset `+1`），其余蓝色 GT/黄色 prediction 定义不变。 |
+| 2026-08-04 | pending | 为 DoF-LR C20 的两条现有 `actual_trace.csv` 增加 matched Base-only QoE batch：逐行复用原 C20 decision 的 frame/source-frame/asset 对齐，仅将所有 cell 固定为 Base，并在独立目录输出 PSNR/SSIM/LPIPS；结果待 HPC。 |
+| 2026-08-04 | pending | 新增 DoF-LR C20 逐帧 Gaussian-count 折线图：两条 test trace 分面展示 Full Base、Full E3 与 Policy，直接读取现有 3548 条 `per_frame_metrics.csv`，不依赖 Base-only QoE 补跑。 |
